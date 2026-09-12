@@ -1,0 +1,99 @@
+{
+    "date":  "2026-07-30",
+    "site":  {
+                 "name":  "TW",
+                 "currency_symbol":  "NT$",
+                 "currency_unit":  "TWD",
+                 "cn_name":  "台湾站点",
+                 "platform_commission":  "14.00",
+                 "handling_fee":  "2.50"
+             },
+    "channel":  {
+                    "site_name":  "TW",
+                    "site_cn":  "台湾站点",
+                    "cargo":  "Normal",
+                    "cargo_cn":  "普货",
+                    "channel":  "蝦皮海外 - 7-11",
+                    "channel_cn":  "蝦皮海外 - 7-11",
+                    "zone":  "所有地区",
+                    "fee_modes":  [
+                                      {
+                                          "name":  "Flat",
+                                          "effective_date":  "2021-01-01",
+                                          "last_effective_date":  "3022-05-08",
+                                          "start_weight":  null,
+                                          "end_weight":  null,
+                                          "original_fee":  60.0,
+                                          "increment_unit":  null,
+                                          "increment_amount":  null,
+                                          "type":  "Buyer"
+                                      },
+                                      {
+                                          "name":  "WeightRange",
+                                          "effective_date":  "2022-05-09",
+                                          "last_effective_date":  "3022-02-14",
+                                          "start_weight":  0.0,
+                                          "end_weight":  500.0,
+                                          "original_fee":  25.0,
+                                          "increment_unit":  null,
+                                          "increment_amount":  null,
+                                          "type":  "Seller"
+                                      },
+                                      {
+                                          "name":  "Increment",
+                                          "effective_date":  "2022-05-09",
+                                          "last_effective_date":  "3022-02-14",
+                                          "start_weight":  500.0,
+                                          "end_weight":  1000.0,
+                                          "original_fee":  null,
+                                          "increment_unit":  500.0,
+                                          "increment_amount":  30.0,
+                                          "type":  "Seller"
+                                      },
+                                      {
+                                          "name":  "Increment",
+                                          "effective_date":  "2022-05-09",
+                                          "last_effective_date":  "3022-02-14",
+                                          "start_weight":  1000.01,
+                                          "end_weight":  1500.0,
+                                          "original_fee":  null,
+                                          "increment_unit":  500.0,
+                                          "increment_amount":  40.0,
+                                          "type":  "Seller"
+                                      },
+                                      {
+                                          "name":  "Increment",
+                                          "effective_date":  "2022-05-09",
+                                          "last_effective_date":  "3022-04-24",
+                                          "start_weight":  1500.01,
+                                          "end_weight":  2000.0,
+                                          "original_fee":  null,
+                                          "increment_unit":  500.0,
+                                          "increment_amount":  40.0,
+                                          "type":  "Seller"
+                                      },
+                                      {
+                                          "name":  "Increment",
+                                          "effective_date":  "2022-05-09",
+                                          "last_effective_date":  "3022-05-09",
+                                          "start_weight":  2000.01,
+                                          "end_weight":  2500.0,
+                                          "original_fee":  null,
+                                          "increment_unit":  500.0,
+                                          "increment_amount":  50.0,
+                                          "type":  "Seller"
+                                      },
+                                      {
+                                          "name":  "Increment",
+                                          "effective_date":  "2022-05-09",
+                                          "last_effective_date":  "3022-05-09",
+                                          "start_weight":  2500.01,
+                                          "end_weight":  null,
+                                          "original_fee":  null,
+                                          "increment_unit":  500.0,
+                                          "increment_amount":  60.0,
+                                          "type":  "Seller"
+                                      }
+                                  ]
+                }
+}

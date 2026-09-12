@@ -1,0 +1,28 @@
+<Window x:Class="EcommerceWorkbench.Views.JoomProductPageWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="JOOM 产品详情页"
+        Height="860"
+        Width="1280"
+        MinHeight="560"
+        MinWidth="900"
+        WindowStartupLocation="CenterOwner">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Border Grid.Row="0"
+                Background="#F8FAFC"
+                BorderBrush="#D7DEE8"
+                BorderThickness="0,0,0,1"
+                Padding="12,8">
+            <TextBlock x:Name="HintText"
+                       TextWrapping="Wrap"
+                       Foreground="#5B6B7C"
+                       Text="正在打开店小秘 JOOM 产品详情页。定价完成后将把售价写入【变种信息】的 MSRP 与价格列，请再在页面上点保存/发布。"/>
+        </Border>
+        <wv2:WebView2 x:Name="Browser" Grid.Row="1"/>
+    </Grid>
+</Window>

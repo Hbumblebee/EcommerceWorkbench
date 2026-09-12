@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationTitle>店小秘 × Shopee 定价工作台</ApplicationTitle>
+    <RootNamespace>EcommerceWorkbench</RootNamespace>
+    <AssemblyName>EcommerceWorkbench</AssemblyName>
+    <Product>店小秘 × Shopee 定价工作台</Product>
+    <Version>1.0.0</Version>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Data\tw-711-rates.json" LogicalName="EcommerceWorkbench.Data.tw-711-rates.json" />
+  </ItemGroup>
+
+</Project>

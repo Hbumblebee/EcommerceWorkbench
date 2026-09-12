@@ -1,0 +1,18 @@
+---
+description: 每次改完代码后必须重新发布 win-x64 单文件 exe
+alwaysApply: true
+---
+
+# 改完代码后重新发布
+
+完成任何会改变可运行程序的代码修改（含 bug 修复、UI、计算逻辑）后，必须执行发布，不要只 `dotnet build`。
+
+使用与 `publish.bat` 相同的命令（不要加 `pause`）：
+
+```bat
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o .\publish
+```
+
+发布成功后告知用户可执行文件路径：`publish\EcommerceWorkbench.exe`。
+
+若 exe 被占用导致发布失败，提示先关闭正在运行的工作台再重试。
