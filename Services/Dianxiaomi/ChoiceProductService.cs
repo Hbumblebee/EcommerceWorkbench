@@ -1,9 +1,12 @@
 /*
  * 功能说明：读取店小秘速卖通全托管（smtChoice）产品编辑页变种 SKU（唯一），供定价后按原 SKU 回写。
- * 主要职责：从维护的 edit 链接解析产品 ID，带 Cookie 调用 choiceProduct/edit.json，解析变种信息。
+ * 主要职责：从维护的 edit 链接解析产品 ID，带 Cookie 调用 choiceProduct/edit.json；
+ *           变种按 SKU 去重，重量按【货品信息】货品条码唯一匹配【变种信息】后取 packageWeight（kg）。
  * 创建日期：2026-09-13
+ * 更新日期：2026-09-13 重量来自货品信息，按货品条码匹配
  */
 
+using System.Globalization;
 using System.Text.Json;
 
 namespace EcommerceWorkbench.Services.Dianxiaomi;
@@ -19,6 +22,8 @@ public sealed class ChoiceProductDetail
 public sealed class ChoiceVariantSkuGroup
 {
     public string PageSku { get; init; } = "";
+    public string BarCode { get; init; } = "";
+    public double? PackageWeightKg { get; init; }
     public int VariantCount { get; init; }
 }
 
@@ -103,8 +108,7 @@ public sealed class ChoiceProductService
             ? productEl
             : data;
 
-        var variants = ReadVariants(product);
-        var unique = DistinctSkus(variants);
+        var unique = GroupUniqueSkus(ReadVariantRows(product));
         if (unique.Count == 0)
             throw new InvalidOperationException("未在【变种信息】中读到 SKU。请确认该产品已填写变种 SKU。");
 
@@ -117,38 +121,64 @@ public sealed class ChoiceProductService
         };
     }
 
-    private static List<ChoiceVariantSkuGroup> DistinctSkus(IEnumerable<string> skus)
+    /// <summary>
+    /// 变种按 SKU 去重；重量按货品条码在货品信息中唯一匹配（同一条码只取第一次出现的重量）。
+    /// </summary>
+    public static List<ChoiceVariantSkuGroup> GroupUniqueSkus(IEnumerable<ChoiceVariantSkuGroup> variants)
     {
+        var goodsByBarcode = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in variants)
+        {
+            var code = NormalizeKey(row.BarCode);
+            if (code.Length == 0 || row.PackageWeightKg is null)
+                continue;
+            goodsByBarcode.TryAdd(code, row.PackageWeightKg.Value);
+        }
+
         var result = new List<ChoiceVariantSkuGroup>();
         var index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var sku in skus)
+        foreach (var row in variants)
         {
-            var key = sku.Trim();
-            if (key.Length == 0)
+            var sku = NormalizeKey(row.PageSku);
+            if (sku.Length == 0)
                 continue;
-            if (index.TryGetValue(key, out var i))
+
+            var code = NormalizeKey(row.BarCode);
+            double? kg = null;
+            if (code.Length > 0 && goodsByBarcode.TryGetValue(code, out var mappedKg))
+                kg = mappedKg;
+
+            if (index.TryGetValue(sku, out var i))
             {
                 var existing = result[i];
                 result[i] = new ChoiceVariantSkuGroup
                 {
                     PageSku = existing.PageSku,
+                    BarCode = existing.BarCode.Length > 0 ? existing.BarCode : code,
+                    PackageWeightKg = existing.PackageWeightKg ?? kg,
                     VariantCount = existing.VariantCount + 1
                 };
             }
             else
             {
-                index[key] = result.Count;
-                result.Add(new ChoiceVariantSkuGroup { PageSku = key, VariantCount = 1 });
+                index[sku] = result.Count;
+                result.Add(new ChoiceVariantSkuGroup
+                {
+                    PageSku = sku,
+                    BarCode = code,
+                    PackageWeightKg = kg,
+                    VariantCount = 1
+                });
             }
         }
 
         return result;
     }
 
-    private static List<string> ReadVariants(JsonElement product)
+    private static List<ChoiceVariantSkuGroup> ReadVariantRows(JsonElement product)
     {
         if (product.TryGetProperty("variationList", out var variants) && variants.ValueKind == JsonValueKind.Array)
-            return ReadSkuColumn(variants);
+            return ReadVariantArray(variants);
 
         foreach (var name in new[] { "variationJson", "variationListStr" })
         {
@@ -163,7 +193,7 @@ public sealed class ChoiceProductService
             {
                 using var doc = JsonDocument.Parse(jsonEl.GetString()!);
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                    return ReadSkuColumn(doc.RootElement);
+                    return ReadVariantArray(doc.RootElement);
             }
             catch (JsonException)
             {
@@ -174,16 +204,23 @@ public sealed class ChoiceProductService
         return [];
     }
 
-    private static List<string> ReadSkuColumn(JsonElement array)
+    private static List<ChoiceVariantSkuGroup> ReadVariantArray(JsonElement array)
     {
-        var list = new List<string>();
+        var list = new List<ChoiceVariantSkuGroup>();
         foreach (var item in array.EnumerateArray())
         {
             if (item.ValueKind != JsonValueKind.Object)
                 continue;
             var sku = GetString(item, "skuCode", "sku");
-            if (!string.IsNullOrWhiteSpace(sku))
-                list.Add(sku);
+            if (string.IsNullOrWhiteSpace(sku))
+                continue;
+            list.Add(new ChoiceVariantSkuGroup
+            {
+                PageSku = sku,
+                BarCode = GetString(item, "scItemBarCode", "scItemBarcode", "barcode"),
+                PackageWeightKg = GetDouble(item, "packageWeight", "package_weight"),
+                VariantCount = 1
+            });
         }
 
         return list;
@@ -235,6 +272,38 @@ public sealed class ChoiceProductService
 
         return "";
     }
+
+    private static double? GetDouble(JsonElement el, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!el.TryGetProperty(name, out var prop)
+                || prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            {
+                continue;
+            }
+
+            if (prop.ValueKind == JsonValueKind.Number && prop.TryGetDouble(out var n))
+                return n;
+
+            if (prop.ValueKind == JsonValueKind.String)
+            {
+                var raw = prop.GetString()?.Trim();
+                if (string.IsNullOrEmpty(raw))
+                    continue;
+                raw = raw.Replace(",", "");
+                if (double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var inv)
+                    || double.TryParse(raw, NumberStyles.Any, CultureInfo.CurrentCulture, out inv))
+                {
+                    return inv;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeKey(string? value) => (value ?? "").Trim();
 
     private static string Truncate(string text, int max)
         => text.Length <= max ? text : text[..max] + "…";

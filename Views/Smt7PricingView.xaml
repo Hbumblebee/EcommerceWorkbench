@@ -86,7 +86,7 @@
                            FontSize="18"
                            FontWeight="Bold"
                            Foreground="{StaticResource TextBrush}"/>
-                <TextBlock Text="打开店小秘速卖通全托管详情页读取【变种信息】SKU；搜索参考价与重量后按全托2.0公式计算，再把最终价回写到供货价"
+                <TextBlock Text="打开店小秘速卖通全托管详情页读取【变种信息】SKU；重量按货品条码匹配【货品信息】的重量(kg)；搜索只取参考价，再按全托2.0计算并回写供货价"
                            Foreground="{StaticResource MutedBrush}"
                            Margin="0,4,0,0"/>
             </StackPanel>
@@ -100,7 +100,7 @@
                 Padding="14,10"
                 Margin="0,10,0,8">
             <StackPanel>
-                <TextBlock Text="公式对齐计算表「全托2.0」：零售价 = ROUND((成本/分子1 + 常量)/分子2, 2)；最终价 = ROUND(零售价 + 重量加价, 2)。搜索重量为克，换算重量 = 克/1000（kg）。修改下方分档后失焦即保存，并按新参数重算。"
+                <TextBlock Text="公式对齐计算表「全托2.0」：零售价 = ROUND((成本/分子1 + 常量)/分子2, 2)；最终价 = ROUND(零售价 + 重量加价, 2)。换算重量取详情页【货品信息】重量(kg)，按货品条码与【变种信息】唯一匹配；重量(g) = kg×1000。搜索只填充成本。修改分档后失焦即保存并重算。"
                            Foreground="{StaticResource MutedBrush}"
                            TextWrapping="Wrap"
                            Margin="0,0,0,8"/>
@@ -245,7 +245,7 @@
                            FontWeight="Bold"
                            Foreground="{StaticResource TextBrush}"
                            Margin="0,0,0,6"/>
-                <TextBlock Text="维护店小秘编辑链接（如 https://www.dianxiaomi.com/web/smtChoice/edit?id=…）。打开后读取【变种信息】SKU 编码；可改「搜索SKU」再定价，回写时仍按「页面SKU」匹配供货价。"
+                <TextBlock Text="维护店小秘编辑链接（如 https://www.dianxiaomi.com/web/smtChoice/edit?id=…）。打开后读取【变种信息】SKU，并用货品条码唯一匹配【货品信息】重量(kg)。可改「搜索SKU」再取参考价；回写仍按「页面SKU」匹配供货价。"
                            Foreground="{StaticResource MutedBrush}"
                            TextWrapping="Wrap"
                            Margin="0,0,0,8"/>
@@ -263,11 +263,11 @@
                     <Button Content="打开速卖通产品详情页"
                             Style="{StaticResource OrangeButton}"
                             Click="OpenProduct_Click"
-                            ToolTip="用已导出 Cookie 打开链接，并读取变种 SKU 到下方表格"/>
+                            ToolTip="用已导出 Cookie 打开链接，读取变种 SKU，并按货品条码匹配货品重量"/>
                     <Button Content="搜索并定价"
                             Background="#0F766E"
                             Click="SearchAndPrice_Click"
-                            ToolTip="按「搜索SKU」调用店小秘商品搜索，再用参考价和重量按全托2.0计算"/>
+                            ToolTip="按「搜索SKU」调用店小秘商品搜索，只用参考价作为成本；重量仍用货品信息匹配结果"/>
                     <Button Content="回写供货价"
                             Style="{StaticResource SuccessButton}"
                             Click="WriteBack_Click"
@@ -408,6 +408,6 @@
                    Margin="4,8,4,0"
                    Foreground="{StaticResource MutedBrush}"
                    TextWrapping="Wrap"
-                   Text="提示：黄色列为可编辑（搜索SKU、成本、重量、换算重量）· 改克或千克会互相同步（kg = g/1000）· 上方分档可改并自动保存 · 最终价写入详情页供货价 · 请在店小秘页面确认后保存/发布"/>
+                   Text="提示：黄色列为可编辑（搜索SKU、成本、重量、换算重量）· 打开详情页时重量按货品条码匹配【货品信息】重量(kg) · 搜索不改重量 · 改克或千克会互相同步 · 最终价写入详情页供货价"/>
     </Grid>
 </UserControl>

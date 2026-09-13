@@ -55,14 +55,14 @@ public sealed class Smt7Row : INotifyPropertyChanged
         set => Set(ref _cost, value);
     }
 
-    /// <summary>重量（克），可编辑；与换算重量按 kg = g/1000 同步。</summary>
+    /// <summary>重量（克），打开详情页时由【货品信息】重量(kg)×1000 填入，可再编辑。</summary>
     public double? Weight
     {
         get => _weight;
         set => Set(ref _weight, value);
     }
 
-    /// <summary>换算重量（千克），可编辑；用于重量加价分档，与重量(g)互相同步。</summary>
+    /// <summary>换算重量（千克），来自货品信息重量(kg)，按货品条码与变种唯一匹配；可再编辑。</summary>
     public string? ConvertedWeight
     {
         get => _convertedWeight;

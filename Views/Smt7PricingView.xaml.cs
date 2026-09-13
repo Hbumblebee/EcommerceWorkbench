@@ -2,7 +2,7 @@
  * 功能说明：速卖通7 批量定价页，对齐计算表全托2.0。
  * 主要职责：打开速卖通全托管详情页读取变种 SKU，搜索参考价/重量后计算最终价，并回写供货价。
  * 创建日期：2026-09-13
- * 更新日期：2026-09-13 列表重量(g)与换算重量(kg)可编辑并互相同步
+ * 更新日期：2026-09-13 重量按货品条码匹配货品信息，搜索只填成本
  */
 
 using System.Collections.ObjectModel;
@@ -81,7 +81,8 @@ public partial class Smt7PricingView : UserControl
     }
 
     /// <summary>
-    /// 将店小秘命中行导入速卖通7 表：按 SKU 覆盖成本与重量，新 SKU 追加，去掉空行后立即计算。
+    /// 将店小秘命中行导入速卖通7 表：按 SKU 覆盖成本（不改重量），新 SKU 追加，去掉空行后立即计算。
+    /// 重量只来自详情页货品信息，不取搜索结果。
     /// </summary>
     public int ImportHits(IReadOnlyList<ProductResultRow> hits)
     {
@@ -113,12 +114,10 @@ public partial class Smt7PricingView : UserControl
                 var cost = hit.Price.HasValue
                     ? (double)Math.Round(hit.Price.Value, 2, MidpointRounding.AwayFromZero)
                     : (double?)null;
-                var weight = hit.Weight.HasValue ? (double)hit.Weight.Value : (double?)null;
 
                 if (bySku.TryGetValue(sku, out var existing))
                 {
                     existing.Cost = cost;
-                    existing.Weight = weight;
                     imported++;
                 }
                 else
@@ -126,8 +125,7 @@ public partial class Smt7PricingView : UserControl
                     var row = new Smt7Row
                     {
                         Sku = hit.Sku.Trim(),
-                        Cost = cost,
-                        Weight = weight
+                        Cost = cost
                     };
                     _rows.Add(row);
                     bySku[sku] = row;
@@ -141,7 +139,7 @@ public partial class Smt7PricingView : UserControl
         {
             _suppressAutoCalc = false;
             RecalculateAll();
-            SetStatus($"已导入 {imported} 条到速卖通7 并完成计算。");
+            SetStatus($"已导入 {imported} 条到速卖通7 并完成计算（重量仍用货品信息，未取搜索重量）。");
         }
 
         return imported;
@@ -168,7 +166,7 @@ public partial class Smt7PricingView : UserControl
 
             if (row.Cost is null)
             {
-                ClearResult(row);
+                ClearResultKeepWeight(row);
                 row.Status = "请填写成本";
                 errCount++;
                 continue;
@@ -242,8 +240,9 @@ public partial class Smt7PricingView : UserControl
             var uniqueSkus = await ReadSkusWithFallbackAsync(productId, cookieHeader);
             LoadUniqueSkus(uniqueSkus);
             _openedEditUrl = editUrl;
-            SetStatus($"已读取变种 SKU {uniqueSkus.Count} 个（已去重）。请按需修改「搜索SKU」后点「搜索并定价」。");
-            _productWindow?.SetHint("已读取变种 SKU。在工作台编辑搜索 SKU 并定价后，点「回写供货价」。");
+            var withWeight = uniqueSkus.Count(g => g.PackageWeightKg is not null);
+            SetStatus($"已读取变种 SKU {uniqueSkus.Count} 个（已去重），其中 {withWeight} 个已按货品条码匹配到货品重量。请按需修改「搜索SKU」后点「搜索并定价」。");
+            _productWindow?.SetHint("已读取变种 SKU 与货品重量。在工作台编辑搜索 SKU 并定价后，点「回写供货价」。");
         }
         catch (Exception ex)
         {
@@ -265,9 +264,10 @@ public partial class Smt7PricingView : UserControl
         {
             if (_productWindow is not null)
             {
-                var pageSkus = await _productWindow.ReadUniqueSkuCodesAsync();
-                if (pageSkus.Count > 0)
-                    return pageSkus.Select(sku => new ChoiceVariantSkuGroup { PageSku = sku, VariantCount = 1 }).ToList();
+                var pageRows = await _productWindow.ReadVariantRowsAsync();
+                var grouped = ChoiceProductService.GroupUniqueSkus(pageRows);
+                if (grouped.Count > 0)
+                    return grouped;
             }
         }
         catch
@@ -308,12 +308,12 @@ public partial class Smt7PricingView : UserControl
         _busy = true;
         try
         {
-            SetStatus($"正在按 {searchValues.Count} 个搜索 SKU 查询参考价与重量…");
+            SetStatus($"正在按 {searchValues.Count} 个搜索 SKU 查询参考价…");
             var outcome = await _productSearch.SearchAsync(searchValues, cookieHeader);
             ApplySearchHits(outcome);
             RecalculateAll();
             MarkMissed(outcome.MissedSkus);
-            SetStatus($"搜索并定价完成：请求 {outcome.RequestedValueCount} 个，命中 {outcome.Rows.Count} 条，未命中 {outcome.MissedSkus.Count} 个。");
+            SetStatus($"搜索并定价完成：请求 {outcome.RequestedValueCount} 个，命中 {outcome.Rows.Count} 条，未命中 {outcome.MissedSkus.Count} 个（重量未改，仍用货品信息）。");
         }
         catch (Exception ex)
         {
@@ -435,10 +435,13 @@ public partial class Smt7PricingView : UserControl
             _rows.Clear();
             foreach (var group in uniqueSkus)
             {
+                var kg = group.PackageWeightKg;
                 _rows.Add(new Smt7Row
                 {
                     PageSku = group.PageSku,
-                    Sku = group.PageSku
+                    Sku = group.PageSku,
+                    Weight = kg is null ? null : Math.Round(kg.Value * 1000.0, 4, MidpointRounding.AwayFromZero),
+                    ConvertedWeight = kg is null ? null : FormatKg(kg.Value)
                 });
             }
 
@@ -470,15 +473,13 @@ public partial class Smt7PricingView : UserControl
             if (!bySku.TryGetValue(key, out var hit))
             {
                 row.Cost = null;
-                row.Weight = null;
-                ClearResult(row);
+                ClearResultKeepWeight(row);
                 continue;
             }
 
             row.Cost = hit.Price.HasValue
                 ? (double)Math.Round(hit.Price.Value, 2, MidpointRounding.AwayFromZero)
                 : null;
-            row.Weight = hit.Weight.HasValue ? (double)hit.Weight.Value : null;
         }
     }
 
@@ -760,6 +761,18 @@ public partial class Smt7PricingView : UserControl
     private static void ClearResult(Smt7Row row)
     {
         row.ConvertedWeight = null;
+        row.Interval = null;
+        row.Margin = null;
+        row.Factor1 = null;
+        row.Constant = null;
+        row.Factor2 = null;
+        row.RetailPrice = null;
+        row.Markup = null;
+        row.FinalPrice = null;
+    }
+
+    private static void ClearResultKeepWeight(Smt7Row row)
+    {
         row.Interval = null;
         row.Margin = null;
         row.Factor1 = null;

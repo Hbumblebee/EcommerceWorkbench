@@ -1,12 +1,15 @@
 /*
- * 功能说明：用已导出 Cookie 打开店小秘速卖通全托管编辑页，读取变种 SKU 并回写供货价。
+ * 功能说明：用已导出 Cookie 打开店小秘速卖通全托管编辑页，读取变种 SKU、货品条码与货品重量，并回写供货价。
  * 创建日期：2026-09-13
+ * 更新日期：2026-09-13 读取货品条码与 packageWeight，供按条码匹配重量
  */
 
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
 using EcommerceWorkbench.Models;
+using EcommerceWorkbench.Services.Dianxiaomi;
 using Microsoft.Web.WebView2.Core;
 
 namespace EcommerceWorkbench.Views;
@@ -44,15 +47,21 @@ public partial class Smt7ProductPageWindow : Window
         Browser.Source = url;
     }
 
-    public async Task<IReadOnlyList<string>> ReadUniqueSkuCodesAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ChoiceVariantSkuGroup>> ReadVariantRowsAsync(CancellationToken cancellationToken = default)
     {
         await EnsureCoreAsync();
         if (Browser.CoreWebView2 is null)
             throw new InvalidOperationException("产品详情页尚未初始化。");
 
         await WaitUntilSkuTableReadyAsync(cancellationToken);
-        var raw = await Browser.CoreWebView2.ExecuteScriptAsync(ReadSkuScript);
-        return ParseSkuList(raw);
+        var raw = await Browser.CoreWebView2.ExecuteScriptAsync(ReadVariantScript);
+        return ParseVariantRows(raw);
+    }
+
+    public async Task<IReadOnlyList<string>> ReadUniqueSkuCodesAsync(CancellationToken cancellationToken = default)
+    {
+        var rows = await ReadVariantRowsAsync(cancellationToken);
+        return ChoiceProductService.GroupUniqueSkus(rows).Select(g => g.PageSku).ToList();
     }
 
     public async Task<Smt7PageWriteResult> WritePricesAsync(
@@ -164,7 +173,7 @@ public partial class Smt7ProductPageWindow : Window
         }
     }
 
-    private static List<string> ParseSkuList(string? executeResult)
+    private static List<ChoiceVariantSkuGroup> ParseVariantRows(string? executeResult)
     {
         var json = UnwrapExecuteScriptResult(executeResult);
         if (string.IsNullOrWhiteSpace(json))
@@ -174,25 +183,60 @@ public partial class Smt7ProductPageWindow : Window
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (root.TryGetProperty("skus", out var skusEl) && skusEl.ValueKind == JsonValueKind.Array)
-            {
-                var list = new List<string>();
-                foreach (var item in skusEl.EnumerateArray())
-                {
-                    var sku = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(sku))
-                        list.Add(sku);
-                }
+            if (!root.TryGetProperty("variants", out var arr) || arr.ValueKind != JsonValueKind.Array)
+                return [];
 
-                return list;
+            var list = new List<ChoiceVariantSkuGroup>();
+            foreach (var item in arr.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                    continue;
+                var sku = GetJsonString(item, "sku");
+                if (string.IsNullOrWhiteSpace(sku))
+                    continue;
+                list.Add(new ChoiceVariantSkuGroup
+                {
+                    PageSku = sku,
+                    BarCode = GetJsonString(item, "barCode"),
+                    PackageWeightKg = GetJsonDouble(item, "packageWeightKg"),
+                    VariantCount = 1
+                });
             }
+
+            return list;
         }
         catch
         {
-            // 解析失败按未读到 SKU 处理
+            return [];
+        }
+    }
+
+    private static string GetJsonString(JsonElement el, string name)
+    {
+        if (!el.TryGetProperty(name, out var prop) || prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return "";
+        return prop.ValueKind == JsonValueKind.String ? (prop.GetString() ?? "") : prop.ToString();
+    }
+
+    private static double? GetJsonDouble(JsonElement el, string name)
+    {
+        if (!el.TryGetProperty(name, out var prop) || prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return null;
+        if (prop.ValueKind == JsonValueKind.Number && prop.TryGetDouble(out var n))
+            return n;
+        if (prop.ValueKind == JsonValueKind.String)
+        {
+            var raw = prop.GetString()?.Trim();
+            if (string.IsNullOrEmpty(raw))
+                return null;
+            if (double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var inv)
+                || double.TryParse(raw, NumberStyles.Any, CultureInfo.CurrentCulture, out inv))
+            {
+                return inv;
+            }
         }
 
-        return [];
+        return null;
     }
 
     private static Smt7PageWriteResult ParseWriteResult(string? executeResult)
@@ -324,21 +368,26 @@ public partial class Smt7ProductPageWindow : Window
         })();
         """;
 
-    private const string ReadSkuScript = """
+    private const string ReadVariantScript = """
         (function () {
+          function num(v) {
+            if (v == null || v === '') return null;
+            const n = Number(v);
+            return Number.isFinite(n) ? n : null;
+          }
           const rows = window.__dxmSmtFindSkuRows && window.__dxmSmtFindSkuRows();
-          if (!rows || !rows.length) return { skus: [] };
-          const seen = {};
-          const skus = [];
+          if (!rows || !rows.length) return { variants: [] };
+          const variants = [];
           for (const row of rows) {
             const sku = String(row.skuCode || row.sku || '').trim();
             if (!sku) continue;
-            const key = sku.toLowerCase();
-            if (seen[key]) continue;
-            seen[key] = true;
-            skus.push(sku);
+            variants.push({
+              sku: sku,
+              barCode: String(row.scItemBarCode || row.scItemBarcode || row.barcode || '').trim(),
+              packageWeightKg: num(row.packageWeight)
+            });
           }
-          return { skus: skus };
+          return { variants: variants };
         })();
         """;
 
