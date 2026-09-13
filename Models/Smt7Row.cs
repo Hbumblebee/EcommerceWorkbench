@@ -55,14 +55,14 @@ public sealed class Smt7Row : INotifyPropertyChanged
         set => Set(ref _cost, value);
     }
 
-    /// <summary>店小秘搜索得到的重量（克）。</summary>
+    /// <summary>重量（克），可编辑；与换算重量按 kg = g/1000 同步。</summary>
     public double? Weight
     {
         get => _weight;
         set => Set(ref _weight, value);
     }
 
-    /// <summary>换算重量（克），与搜索接口重量相同，用于重量加价分档。</summary>
+    /// <summary>换算重量（千克），可编辑；用于重量加价分档，与重量(g)互相同步。</summary>
     public string? ConvertedWeight
     {
         get => _convertedWeight;

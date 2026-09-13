@@ -49,6 +49,22 @@
             <Setter Property="Background" Value="{StaticResource KeyResultBgBrush}"/>
             <Setter Property="FontWeight" Value="Bold"/>
         </Style>
+        <Style x:Key="ParamLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+        <Style x:Key="ParamBox" TargetType="TextBox">
+            <Setter Property="Width" Value="58"/>
+            <Setter Property="HorizontalContentAlignment" Value="Right"/>
+            <Setter Property="Padding" Value="4,3"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+        </Style>
+        <Style x:Key="ParamHeader" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Margin" Value="0,0,6,4"/>
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -84,32 +100,127 @@
                 Padding="14,10"
                 Margin="0,10,0,8">
             <StackPanel>
-                <TextBlock Text="公式对齐计算表「全托2.0」：零售价 = ROUND((成本/分子1 + 常量)/分子2, 2)；最终价 = ROUND(零售价 + 重量加价, 2)。店小秘搜索重量为克，换算重量直接用该值（不再 ×1000）。"
+                <TextBlock Text="公式对齐计算表「全托2.0」：零售价 = ROUND((成本/分子1 + 常量)/分子2, 2)；最终价 = ROUND(零售价 + 重量加价, 2)。搜索重量为克，换算重量 = 克/1000（kg）。修改下方分档后失焦即保存，并按新参数重算。"
                            Foreground="{StaticResource MutedBrush}"
                            TextWrapping="Wrap"
                            Margin="0,0,0,8"/>
                 <WrapPanel>
                     <Border Background="#FFF3E0" Padding="10,8" Margin="0,0,10,8" CornerRadius="4">
                         <StackPanel>
-                            <TextBlock Text="成本分档（分子1 / 常量 / 分子2）" FontWeight="Bold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,4"/>
-                            <TextBlock Text="&lt;2：0.50 / 0.50 / 0.94（35%）  ·  &lt;4：0.55 / 0.50 / 0.94（30%）  ·  &lt;8：0.58 / 0.50 / 0.94（25%）"
-                                       Foreground="{StaticResource TextBrush}" FontSize="12"/>
-                            <TextBlock Text="&lt;20：0.60 / 0.50 / 0.94（25%）  ·  &lt;30：0.62 / 0.50 / 0.94（27%）  ·  ≥30：0.65 / 1.00 / 0.94（25%）"
-                                       Foreground="{StaticResource TextBrush}" FontSize="12" Margin="0,2,0,0"/>
+                            <TextBlock Text="成本分档（成本上限&lt; 不含本档，最后一档为其余）"
+                                       FontWeight="Bold"
+                                       Foreground="{StaticResource TextBrush}"
+                                       Margin="0,0,0,6"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="成本上限&lt;" Style="{StaticResource ParamHeader}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="分子1" Style="{StaticResource ParamHeader}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="常量" Style="{StaticResource ParamHeader}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="3" Text="分子2" Style="{StaticResource ParamHeader}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="4" Text="毛利%" Style="{StaticResource ParamHeader}"/>
+
+                                <TextBox x:Name="CostMaxBox1" Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamBox}" Text="2" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box1" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox1" Grid.Row="1" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box1" Grid.Row="1" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox1" Grid.Row="1" Grid.Column="4" Style="{StaticResource ParamBox}" Text="35" LostFocus="Param_LostFocus"/>
+
+                                <TextBox x:Name="CostMaxBox2" Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamBox}" Text="4" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box2" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.55" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox2" Grid.Row="2" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box2" Grid.Row="2" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox2" Grid.Row="2" Grid.Column="4" Style="{StaticResource ParamBox}" Text="30" LostFocus="Param_LostFocus"/>
+
+                                <TextBox x:Name="CostMaxBox3" Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamBox}" Text="8" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box3" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.58" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox3" Grid.Row="3" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box3" Grid.Row="3" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox3" Grid.Row="3" Grid.Column="4" Style="{StaticResource ParamBox}" Text="25" LostFocus="Param_LostFocus"/>
+
+                                <TextBox x:Name="CostMaxBox4" Grid.Row="4" Grid.Column="0" Style="{StaticResource ParamBox}" Text="20" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box4" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.60" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox4" Grid.Row="4" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box4" Grid.Row="4" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox4" Grid.Row="4" Grid.Column="4" Style="{StaticResource ParamBox}" Text="25" LostFocus="Param_LostFocus"/>
+
+                                <TextBox x:Name="CostMaxBox5" Grid.Row="5" Grid.Column="0" Style="{StaticResource ParamBox}" Text="30" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box5" Grid.Row="5" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.62" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox5" Grid.Row="5" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box5" Grid.Row="5" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox5" Grid.Row="5" Grid.Column="4" Style="{StaticResource ParamBox}" Text="27" LostFocus="Param_LostFocus"/>
+
+                                <TextBox Grid.Row="6" Grid.Column="0" Style="{StaticResource ParamBox}" Text="其余" IsReadOnly="True"
+                                         HorizontalContentAlignment="Center" Background="#EEF2F6"/>
+                                <TextBox x:Name="CostFactor1Box6" Grid.Row="6" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.65" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox6" Grid.Row="6" Grid.Column="2" Style="{StaticResource ParamBox}" Text="1.00" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box6" Grid.Row="6" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox6" Grid.Row="6" Grid.Column="4" Style="{StaticResource ParamBox}" Text="25" LostFocus="Param_LostFocus"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
                     <Border Background="#F8FAFC" Padding="10,8" Margin="0,0,10,8" CornerRadius="4">
                         <StackPanel>
-                            <TextBlock Text="重量加价（换算重量·克）" FontWeight="Bold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,4"/>
-                            <TextBlock Text="&lt;200：+0    &lt;500：+0.50    &lt;1000：+1.00    ≥1000：+2.00"
-                                       Foreground="{StaticResource TextBrush}" FontSize="12"/>
+                            <TextBlock Text="重量加价（换算重量 kg，上限不含本档）"
+                                       FontWeight="Bold"
+                                       Foreground="{StaticResource TextBrush}"
+                                       Margin="0,0,0,6"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="换算重量&lt;(kg)" Style="{StaticResource ParamHeader}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="加价" Style="{StaticResource ParamHeader}"/>
+
+                                <TextBox x:Name="WeightMaxBox1" Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" Text="0.2" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMarkupBox1" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0" LostFocus="Param_LostFocus"/>
+
+                                <TextBox x:Name="WeightMaxBox2" Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" Text="0.5" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMarkupBox2" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
+
+                                <TextBox x:Name="WeightMaxBox3" Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" Text="1" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMarkupBox3" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamBox}" Text="1.00" LostFocus="Param_LostFocus"/>
+
+                                <TextBox Grid.Row="4" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" Text="其余" IsReadOnly="True"
+                                         HorizontalContentAlignment="Center" Background="#EEF2F6"/>
+                                <TextBox x:Name="WeightMarkupBox4" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamBox}" Text="2.00" LostFocus="Param_LostFocus"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
-                    <CheckBox x:Name="AutoCalcCheck"
-                              Content="编辑后自动计算"
-                              IsChecked="True"
-                              VerticalAlignment="Center"
-                              Margin="8,8,0,8"/>
+                    <StackPanel VerticalAlignment="Center" Margin="8,8,0,8">
+                        <CheckBox x:Name="AutoCalcCheck"
+                                  Content="参数变更后自动计算"
+                                  IsChecked="True"
+                                  Margin="0,0,0,8"/>
+                        <Button Content="恢复默认参数"
+                                Style="{StaticResource GhostButton}"
+                                Click="RestoreParams_Click"
+                                HorizontalAlignment="Left"
+                                Margin="0"
+                                ToolTip="恢复全托2.0 默认分档：成本 2/4/8/20/30，重量 0.2/0.5/1 kg"/>
+                    </StackPanel>
                 </WrapPanel>
                 <WrapPanel Margin="0,4,0,0">
                     <Button Content="批量计算 (F5)" Style="{StaticResource OrangeButton}" Click="Calc_Click"
@@ -248,11 +359,16 @@
                                         Width="88"
                                         ElementStyle="{StaticResource InputCell}"
                                         EditingElementStyle="{StaticResource InputEdit}"/>
-                    <DataGridTextColumn Header="重量(g)" Binding="{Binding Weight, Converter={StaticResource NullableDouble}}"
-                                        IsReadOnly="True" Width="78"
-                                        ElementStyle="{StaticResource ResultCell}"/>
-                    <DataGridTextColumn Header="换算重量(g)" Binding="{Binding ConvertedWeight}" IsReadOnly="True" Width="88"
-                                        ElementStyle="{StaticResource ResultCell}"/>
+                    <DataGridTextColumn Header="重量(g)"
+                                        Binding="{Binding Weight, Converter={StaticResource NullableDouble}, UpdateSourceTrigger=LostFocus}"
+                                        Width="78"
+                                        ElementStyle="{StaticResource InputCell}"
+                                        EditingElementStyle="{StaticResource InputEdit}"/>
+                    <DataGridTextColumn Header="换算重量(kg)"
+                                        Binding="{Binding ConvertedWeight, UpdateSourceTrigger=LostFocus}"
+                                        Width="96"
+                                        ElementStyle="{StaticResource InputCell}"
+                                        EditingElementStyle="{StaticResource InputEdit}"/>
                     <DataGridTextColumn Header="区间" Binding="{Binding Interval}" IsReadOnly="True" Width="78"
                                         ElementStyle="{StaticResource ResultCell}"/>
                     <DataGridTextColumn Header="毛利" Binding="{Binding Margin}" IsReadOnly="True" Width="78"
@@ -292,6 +408,6 @@
                    Margin="4,8,4,0"
                    Foreground="{StaticResource MutedBrush}"
                    TextWrapping="Wrap"
-                   Text="提示：黄色列为可编辑（搜索SKU、成本）· 页面SKU 与搜索SKU 一对一 · 最终价写入详情页供货价 · 请在店小秘页面确认后保存/发布"/>
+                   Text="提示：黄色列为可编辑（搜索SKU、成本、重量、换算重量）· 改克或千克会互相同步（kg = g/1000）· 上方分档可改并自动保存 · 最终价写入详情页供货价 · 请在店小秘页面确认后保存/发布"/>
     </Grid>
 </UserControl>

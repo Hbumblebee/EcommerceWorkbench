@@ -2,7 +2,7 @@
  * 功能说明：速卖通7 批量定价页，对齐计算表全托2.0。
  * 主要职责：打开速卖通全托管详情页读取变种 SKU，搜索参考价/重量后计算最终价，并回写供货价。
  * 创建日期：2026-09-13
- * 更新日期：2026-09-13 搜索接口重量按克参与全托2.0 加价，不再 ×1000
+ * 更新日期：2026-09-13 列表重量(g)与换算重量(kg)可编辑并互相同步
  */
 
 using System.Collections.ObjectModel;
@@ -25,7 +25,13 @@ public partial class Smt7PricingView : UserControl
     private readonly ProductSearchService _productSearch;
     private readonly CookieStore _cookieStore = new();
     private readonly Smt7UserSettings _settings = Smt7UserSettings.Load();
-    private readonly Smt7Settings _calcSettings = Smt7Settings.CreateDefault();
+    private TextBox[] _costMaxBoxes = [];
+    private TextBox[] _costFactor1Boxes = [];
+    private TextBox[] _costConstBoxes = [];
+    private TextBox[] _costFactor2Boxes = [];
+    private TextBox[] _costMarginBoxes = [];
+    private TextBox[] _weightMaxBoxes = [];
+    private TextBox[] _weightMarkupBoxes = [];
     private bool _suppressAutoCalc;
     private bool _loaded;
     private bool _busy;
@@ -41,6 +47,7 @@ public partial class Smt7PricingView : UserControl
     public Smt7PricingView()
     {
         InitializeComponent();
+        BindParamBoxes();
         _choiceProduct = new ChoiceProductService(_apiClient);
         _productSearch = new ProductSearchService(_apiClient);
         PricingGrid.ItemsSource = _rows;
@@ -69,6 +76,7 @@ public partial class Smt7PricingView : UserControl
         _loaded = true;
         if (!string.IsNullOrWhiteSpace(_settings.ProductEditUrl))
             ProductUrlBox.Text = _settings.ProductEditUrl;
+        ApplyParamsToBoxes(_settings.ToCalcSettings());
         SeedEmptyRows(12);
     }
 
@@ -142,6 +150,8 @@ public partial class Smt7PricingView : UserControl
     public void RecalculateAll()
     {
         CommitGrid();
+        var calcSettings = ReadSettings();
+        PersistCalcSettings(calcSettings);
         var okCount = 0;
         var skipCount = 0;
         var errCount = 0;
@@ -166,8 +176,8 @@ public partial class Smt7PricingView : UserControl
 
             try
             {
-                var result = Smt7Calculator.Calculate(row.Cost.Value, row.Weight, _calcSettings);
-                row.ConvertedWeight = FormatMoney(result.ConvertedWeightGrams);
+                var result = Smt7Calculator.Calculate(row.Cost.Value, row.Weight, calcSettings);
+                row.ConvertedWeight = FormatKg(result.ConvertedWeightKg);
                 row.Interval = result.Interval;
                 row.Margin = result.Margin;
                 row.Factor1 = FormatMoney(result.Factor1);
@@ -556,6 +566,32 @@ public partial class Smt7PricingView : UserControl
 
     private void Calc_Click(object sender, RoutedEventArgs e) => RecalculateAll();
 
+    private void RestoreParams_Click(object sender, RoutedEventArgs e)
+    {
+        var defaults = Smt7Settings.CreateDefault();
+        _suppressAutoCalc = true;
+        try
+        {
+            ApplyParamsToBoxes(defaults);
+        }
+        finally
+        {
+            _suppressAutoCalc = false;
+        }
+
+        PersistCalcSettings(defaults);
+        RecalculateAll();
+        SetStatus("已恢复全托2.0 默认分档参数。");
+    }
+
+    private void Param_LostFocus(object sender, RoutedEventArgs e)
+    {
+        PersistCalcSettings(ReadSettings());
+        if (_suppressAutoCalc || AutoCalcCheck.IsChecked != true)
+            return;
+        RecalculateAll();
+    }
+
     private void AddRow_Click(object sender, RoutedEventArgs e)
     {
         _rows.Add(new Smt7Row { Index = _rows.Count + 1 });
@@ -643,9 +679,55 @@ public partial class Smt7PricingView : UserControl
 
     private void PricingGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
     {
+        if (e.EditAction == DataGridEditAction.Commit && e.Row.Item is Smt7Row row)
+            SyncWeightColumns(row, e.Column.Header?.ToString(), (e.EditingElement as TextBox)?.Text);
+
         if (_suppressAutoCalc || AutoCalcCheck.IsChecked != true)
             return;
         Dispatcher.BeginInvoke(RecalculateAll, System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// 重量(g) 与换算重量(kg) 双向同步：改克则重算千克，改千克则反推克。
+    /// </summary>
+    private static void SyncWeightColumns(Smt7Row row, string? header, string? text)
+    {
+        header ??= "";
+        var raw = text?.Trim();
+        var empty = string.IsNullOrEmpty(raw);
+
+        if (header == "换算重量(kg)")
+        {
+            if (empty)
+            {
+                row.Weight = null;
+                row.ConvertedWeight = null;
+                return;
+            }
+
+            if (!TryParseDouble(raw!, out var kg))
+                return;
+
+            row.Weight = Math.Round(kg * 1000.0, 4, MidpointRounding.AwayFromZero);
+            row.ConvertedWeight = FormatKg(kg);
+            return;
+        }
+
+        if (header != "重量(g)")
+            return;
+
+        if (empty)
+        {
+            row.Weight = null;
+            row.ConvertedWeight = null;
+            return;
+        }
+
+        if (!TryParseDouble(raw!, out var grams))
+            return;
+
+        row.Weight = grams;
+        row.ConvertedWeight = FormatKg(grams / 1000.0);
     }
 
     private void SeedEmptyRows(int count)
@@ -693,4 +775,114 @@ public partial class Smt7PricingView : UserControl
     private static string NormalizeSku(string? sku) => (sku ?? "").Trim();
 
     private static string FormatMoney(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string FormatKg(double v)
+    {
+        if (Math.Abs(v) < 1e-12)
+            return "0";
+        return v.ToString("0.####", CultureInfo.InvariantCulture);
+    }
+
+    private void BindParamBoxes()
+    {
+        _costMaxBoxes = [CostMaxBox1, CostMaxBox2, CostMaxBox3, CostMaxBox4, CostMaxBox5];
+        _costFactor1Boxes = [CostFactor1Box1, CostFactor1Box2, CostFactor1Box3, CostFactor1Box4, CostFactor1Box5, CostFactor1Box6];
+        _costConstBoxes = [CostConstBox1, CostConstBox2, CostConstBox3, CostConstBox4, CostConstBox5, CostConstBox6];
+        _costFactor2Boxes = [CostFactor2Box1, CostFactor2Box2, CostFactor2Box3, CostFactor2Box4, CostFactor2Box5, CostFactor2Box6];
+        _costMarginBoxes = [CostMarginBox1, CostMarginBox2, CostMarginBox3, CostMarginBox4, CostMarginBox5, CostMarginBox6];
+        _weightMaxBoxes = [WeightMaxBox1, WeightMaxBox2, WeightMaxBox3];
+        _weightMarkupBoxes = [WeightMarkupBox1, WeightMarkupBox2, WeightMarkupBox3, WeightMarkupBox4];
+    }
+
+    private void ApplyParamsToBoxes(Smt7Settings settings)
+    {
+        var defaults = Smt7Settings.CreateDefault();
+        var costTiers = settings.CostTiers.Count == defaults.CostTiers.Count ? settings.CostTiers : defaults.CostTiers;
+        var weightTiers = settings.WeightTiers.Count == defaults.WeightTiers.Count ? settings.WeightTiers : defaults.WeightTiers;
+
+        for (var i = 0; i < _costMaxBoxes.Length; i++)
+            _costMaxBoxes[i].Text = FormatThreshold(costTiers[i].MaxExclusiveCost ?? defaults.CostTiers[i].MaxExclusiveCost ?? 0);
+
+        for (var i = 0; i < costTiers.Count; i++)
+        {
+            _costFactor1Boxes[i].Text = FormatParam(costTiers[i].Factor1);
+            _costConstBoxes[i].Text = FormatParam(costTiers[i].Constant);
+            _costFactor2Boxes[i].Text = FormatParam(costTiers[i].Factor2);
+            _costMarginBoxes[i].Text = FormatThreshold(costTiers[i].MarginPercent);
+        }
+
+        for (var i = 0; i < _weightMaxBoxes.Length; i++)
+            _weightMaxBoxes[i].Text = FormatThreshold(weightTiers[i].MaxExclusiveKg ?? defaults.WeightTiers[i].MaxExclusiveKg ?? 0);
+
+        for (var i = 0; i < weightTiers.Count; i++)
+            _weightMarkupBoxes[i].Text = FormatParam(weightTiers[i].Markup);
+    }
+
+    private Smt7Settings ReadSettings()
+    {
+        var defaults = Smt7Settings.CreateDefault();
+        var settings = new Smt7Settings();
+
+        for (var i = 0; i < defaults.CostTiers.Count; i++)
+        {
+            var fallback = defaults.CostTiers[i];
+            settings.CostTiers.Add(new Smt7CostTier
+            {
+                MaxExclusiveCost = i == defaults.CostTiers.Count - 1
+                    ? null
+                    : ReadDouble(_costMaxBoxes[i], fallback.MaxExclusiveCost ?? 0),
+                Factor1 = ReadDouble(_costFactor1Boxes[i], fallback.Factor1),
+                Constant = ReadDouble(_costConstBoxes[i], fallback.Constant),
+                Factor2 = ReadDouble(_costFactor2Boxes[i], fallback.Factor2),
+                MarginPercent = ReadDouble(_costMarginBoxes[i], fallback.MarginPercent)
+            });
+        }
+
+        for (var i = 0; i < defaults.WeightTiers.Count; i++)
+        {
+            var fallback = defaults.WeightTiers[i];
+            settings.WeightTiers.Add(new Smt7WeightTier
+            {
+                MaxExclusiveKg = i == defaults.WeightTiers.Count - 1
+                    ? null
+                    : ReadDouble(_weightMaxBoxes[i], fallback.MaxExclusiveKg ?? 0),
+                Markup = ReadDouble(_weightMarkupBoxes[i], fallback.Markup)
+            });
+        }
+
+        Smt7Calculator.ApplyIntervalNames(settings);
+        return settings;
+    }
+
+    private void PersistCalcSettings(Smt7Settings settings)
+    {
+        try
+        {
+            _settings.ApplyCalcSettings(settings);
+            _settings.Save();
+        }
+        catch
+        {
+            // 本地保存失败不阻断计算
+        }
+    }
+
+    private static double ReadDouble(TextBox box, double fallback)
+    {
+        var raw = box.Text?.Trim().TrimEnd('%').Trim();
+        if (string.IsNullOrEmpty(raw))
+            return fallback;
+        return TryParseDouble(raw, out var v) ? v : fallback;
+    }
+
+    private static bool TryParseDouble(string text, out double value)
+    {
+        text = text.Trim().Replace(",", "");
+        return double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value)
+               || double.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
+    }
+
+    private static string FormatParam(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string FormatThreshold(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);
 }
