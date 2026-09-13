@@ -5,6 +5,7 @@
  * 修改记录：2026-08-14 迁入工作台 UserControl，增加导入到定价
  *           2026-08-15 参考价复制时按两位小数输出
  *           2026-09-05 命中结果增加 JOOM 计算导入
+ *           2026-09-13 命中结果增加速卖通7 计算导入
  */
 
 using System.IO;
@@ -37,6 +38,7 @@ public partial class DianxiaomiSearchView : UserControl
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<IReadOnlyList<ProductResultRow>>? ImportToPricingRequested;
     public event EventHandler<IReadOnlyList<ProductResultRow>>? ImportToJoomRequested;
+    public event EventHandler<IReadOnlyList<ProductResultRow>>? ImportToSmt7Requested;
 
     public string? TryGetCookieHeader()
         => HasCookie ? CookieStore.ToCookieHeader(_currentExport!.Cookies) : null;
@@ -387,6 +389,17 @@ public partial class DianxiaomiSearchView : UserControl
         }
 
         ImportToJoomRequested?.Invoke(this, _lastRows);
+    }
+
+    private void ImportToSmt7_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lastRows.Count == 0)
+        {
+            MessageBox.Show("暂无命中结果可计算。请先搜索商品。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        ImportToSmt7Requested?.Invoke(this, _lastRows);
     }
 
     private void UpdateResultSummary()

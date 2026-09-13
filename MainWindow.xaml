@@ -60,7 +60,7 @@
                                FontSize="18"
                                FontWeight="SemiBold"
                                Foreground="{StaticResource TextBrush}"/>
-                    <TextBlock Text="搜索店小秘商品后一键导入 Shopee 定价或 JOOM 计算"
+                    <TextBlock Text="搜索店小秘商品后一键导入 Shopee 定价、JOOM 或速卖通7 计算"
                                Foreground="{StaticResource MutedBrush}"
                                Margin="0,2,0,0"/>
                 </StackPanel>
@@ -87,6 +87,10 @@
                              Style="{StaticResource TabRadio}"
                              Content="JOOM"
                              Checked="TabJoom_Checked"/>
+                <RadioButton x:Name="TabSmt7"
+                             Style="{StaticResource TabRadio}"
+                             Content="速卖通7"
+                             Checked="TabSmt7_Checked"/>
             </StackPanel>
         </Border>
 
@@ -100,6 +104,7 @@
                 <views:DianxiaomiSearchView x:Name="SearchView"/>
                 <views:ShopeePricingView x:Name="PricingView" Visibility="Collapsed"/>
                 <views:JoomPricingView x:Name="JoomView" Visibility="Collapsed"/>
+                <views:Smt7PricingView x:Name="Smt7View" Visibility="Collapsed"/>
             </Grid>
         </Border>
 

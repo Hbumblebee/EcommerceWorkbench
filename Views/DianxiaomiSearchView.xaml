@@ -159,6 +159,10 @@
                                             Background="#0F766E"
                                             Margin="0,0,6,0"
                                             Click="ImportToJoom_Click"/>
+                                    <Button Content="速卖通7计算"
+                                            Background="#0F766E"
+                                            Margin="0,0,6,0"
+                                            Click="ImportToSmt7_Click"/>
                                     <Button Content="复制SKU和价格"
                                             Background="#3B82F6"
                                             Margin="0,0,6,0"

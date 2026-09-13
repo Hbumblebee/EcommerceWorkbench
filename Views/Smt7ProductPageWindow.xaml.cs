@@ -1,7 +1,6 @@
 /*
- * 功能说明：用已导出 Cookie 打开店小秘 JOOM 产品编辑页，并向变种表写入 MSRP/价格。
- * 创建日期：2026-09-05
- * 更新日期：2026-09-12 详情页为独立窗口，不压在工作台上面
+ * 功能说明：用已导出 Cookie 打开店小秘速卖通全托管编辑页，读取变种 SKU 并回写供货价。
+ * 创建日期：2026-09-13
  */
 
 using System.IO;
@@ -12,12 +11,12 @@ using Microsoft.Web.WebView2.Core;
 
 namespace EcommerceWorkbench.Views;
 
-public partial class JoomProductPageWindow : Window
+public partial class Smt7ProductPageWindow : Window
 {
     private bool _coreReady;
     private bool _finderInstalled;
 
-    public JoomProductPageWindow()
+    public Smt7ProductPageWindow()
     {
         InitializeComponent();
         Closed += (_, _) =>
@@ -45,16 +44,27 @@ public partial class JoomProductPageWindow : Window
         Browser.Source = url;
     }
 
-    public async Task<JoomPageWriteResult> WritePricesAsync(
+    public async Task<IReadOnlyList<string>> ReadUniqueSkuCodesAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureCoreAsync();
+        if (Browser.CoreWebView2 is null)
+            throw new InvalidOperationException("产品详情页尚未初始化。");
+
+        await WaitUntilSkuTableReadyAsync(cancellationToken);
+        var raw = await Browser.CoreWebView2.ExecuteScriptAsync(ReadSkuScript);
+        return ParseSkuList(raw);
+    }
+
+    public async Task<Smt7PageWriteResult> WritePricesAsync(
         IReadOnlyDictionary<string, string> pageSkuToPrice,
         CancellationToken cancellationToken = default)
     {
         if (pageSkuToPrice.Count == 0)
-            return new JoomPageWriteResult { Error = "没有可回写的售价。" };
+            return new Smt7PageWriteResult { Error = "没有可回写的最终价。" };
 
         await EnsureCoreAsync();
         if (Browser.CoreWebView2 is null)
-            return new JoomPageWriteResult { Error = "产品详情页尚未初始化。" };
+            return new Smt7PageWriteResult { Error = "产品详情页尚未初始化。" };
 
         await WaitUntilSkuTableReadyAsync(cancellationToken);
         var mapJson = JsonSerializer.Serialize(pageSkuToPrice);
@@ -70,7 +80,7 @@ public partial class JoomProductPageWindow : Window
         if (_coreReady && Browser.CoreWebView2 is not null)
             return;
 
-        var userData = Path.Combine(AppPaths.DataDirectory, "webview-joom");
+        var userData = Path.Combine(AppPaths.DataDirectory, "webview-smt7");
         Directory.CreateDirectory(userData);
         var env = await CoreWebView2Environment.CreateAsync(userDataFolder: userData);
         await Browser.EnsureCoreWebView2Async(env);
@@ -135,7 +145,7 @@ public partial class JoomProductPageWindow : Window
             await Task.Delay(500, cancellationToken);
         }
 
-        throw new InvalidOperationException("页面变种表格尚未加载完成。请确认已登录且详情页已打开，然后重试回写。");
+        throw new InvalidOperationException("页面变种表格尚未加载完成。请确认已登录且详情页已打开，然后重试。");
     }
 
     private static bool IsReady(string? executeResult)
@@ -154,11 +164,42 @@ public partial class JoomProductPageWindow : Window
         }
     }
 
-    private static JoomPageWriteResult ParseWriteResult(string? executeResult)
+    private static List<string> ParseSkuList(string? executeResult)
     {
         var json = UnwrapExecuteScriptResult(executeResult);
         if (string.IsNullOrWhiteSpace(json))
-            return new JoomPageWriteResult { Error = "页面脚本没有返回结果。" };
+            return [];
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("skus", out var skusEl) && skusEl.ValueKind == JsonValueKind.Array)
+            {
+                var list = new List<string>();
+                foreach (var item in skusEl.EnumerateArray())
+                {
+                    var sku = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(sku))
+                        list.Add(sku);
+                }
+
+                return list;
+            }
+        }
+        catch
+        {
+            // 解析失败按未读到 SKU 处理
+        }
+
+        return [];
+    }
+
+    private static Smt7PageWriteResult ParseWriteResult(string? executeResult)
+    {
+        var json = UnwrapExecuteScriptResult(executeResult);
+        if (string.IsNullOrWhiteSpace(json))
+            return new Smt7PageWriteResult { Error = "页面脚本没有返回结果。" };
 
         try
         {
@@ -177,7 +218,7 @@ public partial class JoomProductPageWindow : Window
                 }
             }
 
-            return new JoomPageWriteResult
+            return new Smt7PageWriteResult
             {
                 Updated = updated,
                 MissedPageSkus = missed,
@@ -186,7 +227,7 @@ public partial class JoomProductPageWindow : Window
         }
         catch (Exception ex)
         {
-            return new JoomPageWriteResult { Error = "解析回写结果失败：" + ex.Message };
+            return new Smt7PageWriteResult { Error = "解析回写结果失败：" + ex.Message };
         }
     }
 
@@ -208,23 +249,32 @@ public partial class JoomProductPageWindow : Window
     }
 
     private const string FinderScript = """
-        window.__dxmJoomFindSkuRows = function () {
+        window.__dxmSmtFindSkuRows = function () {
           function looksLikeSkuRows(list) {
-            return Array.isArray(list) && list.length && list[0] && (typeof list[0].sku !== 'undefined' || typeof list[0].msrp !== 'undefined');
+            return Array.isArray(list) && list.length && list[0]
+              && (typeof list[0].skuCode !== 'undefined' || typeof list[0].skuPrice !== 'undefined');
+          }
+          function listFromStore(store) {
+            if (!store) return null;
+            return (store.formState && store.formState.skuDataList) || store.skuDataList;
           }
           function fromPinia(pinia) {
             if (!pinia) return null;
             try {
               if (pinia._s && typeof pinia._s.get === 'function') {
-                const store = pinia._s.get('joomSkuDataStore');
-                if (store) {
-                  const list = (store.formState && store.formState.skuDataList) || store.skuDataList;
-                  if (looksLikeSkuRows(list)) return list;
+                const named = pinia._s.get('smtChoiceSkuDataStore');
+                const namedList = listFromStore(named);
+                if (looksLikeSkuRows(namedList)) return namedList;
+                if (typeof pinia._s.values === 'function') {
+                  for (const store of pinia._s.values()) {
+                    const list = listFromStore(store);
+                    if (looksLikeSkuRows(list)) return list;
+                  }
                 }
               }
-              const state = pinia.state && pinia.state.value && pinia.state.value.joomSkuDataStore;
+              const state = pinia.state && pinia.state.value && pinia.state.value.smtChoiceSkuDataStore;
               if (state) {
-                const list = (state.formState && state.formState.skuDataList) || state.skuDataList;
+                const list = listFromStore(state);
                 if (looksLikeSkuRows(list)) return list;
               }
             } catch (e) {}
@@ -269,8 +319,26 @@ public partial class JoomProductPageWindow : Window
 
     private const string ReadyScript = """
         (function () {
-          const rows = window.__dxmJoomFindSkuRows && window.__dxmJoomFindSkuRows();
+          const rows = window.__dxmSmtFindSkuRows && window.__dxmSmtFindSkuRows();
           return { ok: !!(rows && rows.length) };
+        })();
+        """;
+
+    private const string ReadSkuScript = """
+        (function () {
+          const rows = window.__dxmSmtFindSkuRows && window.__dxmSmtFindSkuRows();
+          if (!rows || !rows.length) return { skus: [] };
+          const seen = {};
+          const skus = [];
+          for (const row of rows) {
+            const sku = String(row.skuCode || row.sku || '').trim();
+            if (!sku) continue;
+            const key = sku.toLowerCase();
+            if (seen[key]) continue;
+            seen[key] = true;
+            skus.push(sku);
+          }
+          return { skus: skus };
         })();
         """;
 
@@ -290,18 +358,18 @@ public partial class JoomProductPageWindow : Window
             }
             return null;
           }
-          const rows = window.__dxmJoomFindSkuRows && window.__dxmJoomFindSkuRows();
+          const rows = window.__dxmSmtFindSkuRows && window.__dxmSmtFindSkuRows();
           if (!rows || !rows.length) return { updated: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
           const seen = {};
           let updated = 0;
           for (const row of rows) {
-            const sku = String(row.sku || '').trim();
+            const sku = String(row.skuCode || row.sku || '').trim();
             if (!sku) continue;
             const price = lookup(sku);
             if (price == null || price === '') continue;
             const text = String(price);
-            row.msrp = text;
-            row.price = text;
+            const num = Number(text);
+            row.skuPrice = Number.isFinite(num) ? num : text;
             seen[sku.toLowerCase()] = true;
             updated += 1;
           }
@@ -314,7 +382,7 @@ public partial class JoomProductPageWindow : Window
         """;
 }
 
-public sealed class JoomPageWriteResult
+public sealed class Smt7PageWriteResult
 {
     public int Updated { get; init; }
     public List<string> MissedPageSkus { get; init; } = [];

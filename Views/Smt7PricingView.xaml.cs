@@ -1,9 +1,8 @@
 /*
- * 功能说明：JOOM 批量定价页，对齐计算表 JOOM1.0。
- * 主要职责：承接店小秘命中行的 SKU/成本，按成本区间计算美元售价与人民币利润；
- *           也可打开 JOOM 产品详情页读取变种 SKU，搜索定价后回写 MSRP/价格。
- * 创建日期：2026-09-05
- * 更新日期：2026-09-12 打开详情页后回到工作台，避免弹窗盖住定价页
+ * 功能说明：速卖通7 批量定价页，对齐计算表全托2.0。
+ * 主要职责：打开速卖通全托管详情页读取变种 SKU，搜索参考价/重量后计算最终价，并回写供货价。
+ * 创建日期：2026-09-13
+ * 更新日期：2026-09-13 搜索接口重量按克参与全托2.0 加价，不再 ×1000
  */
 
 using System.Collections.ObjectModel;
@@ -14,22 +13,23 @@ using System.Windows.Controls;
 using EcommerceWorkbench.Models;
 using EcommerceWorkbench.Services;
 using EcommerceWorkbench.Services.Dianxiaomi;
-using EcommerceWorkbench.Services.Joom;
+using EcommerceWorkbench.Services.Smt7;
 
 namespace EcommerceWorkbench.Views;
 
-public partial class JoomPricingView : UserControl
+public partial class Smt7PricingView : UserControl
 {
-    private readonly ObservableCollection<JoomRow> _rows = [];
+    private readonly ObservableCollection<Smt7Row> _rows = [];
     private readonly ApiClient _apiClient = new();
-    private readonly JoomProductService _joomProduct;
+    private readonly ChoiceProductService _choiceProduct;
     private readonly ProductSearchService _productSearch;
     private readonly CookieStore _cookieStore = new();
-    private readonly JoomUserSettings _settings = JoomUserSettings.Load();
+    private readonly Smt7UserSettings _settings = Smt7UserSettings.Load();
+    private readonly Smt7Settings _calcSettings = Smt7Settings.CreateDefault();
     private bool _suppressAutoCalc;
     private bool _loaded;
     private bool _busy;
-    private JoomProductPageWindow? _productWindow;
+    private Smt7ProductPageWindow? _productWindow;
     private string? _openedEditUrl;
 
     public event EventHandler<string>? StatusChanged;
@@ -38,13 +38,13 @@ public partial class JoomPricingView : UserControl
     public Func<IReadOnlyList<CookieRecord>?>? CookieRecordsProvider { get; set; }
     public event EventHandler<string>? CookieInvalidated;
 
-    public JoomPricingView()
+    public Smt7PricingView()
     {
         InitializeComponent();
-        _joomProduct = new JoomProductService(_apiClient);
+        _choiceProduct = new ChoiceProductService(_apiClient);
         _productSearch = new ProductSearchService(_apiClient);
         PricingGrid.ItemsSource = _rows;
-        Loaded += JoomPricingView_Loaded;
+        Loaded += Smt7PricingView_Loaded;
     }
 
     public void Cleanup()
@@ -62,7 +62,7 @@ public partial class JoomPricingView : UserControl
         _apiClient.Dispose();
     }
 
-    private void JoomPricingView_Loaded(object sender, RoutedEventArgs e)
+    private void Smt7PricingView_Loaded(object sender, RoutedEventArgs e)
     {
         if (_loaded)
             return;
@@ -73,7 +73,7 @@ public partial class JoomPricingView : UserControl
     }
 
     /// <summary>
-    /// 将店小秘命中行导入 JOOM 表：按 SKU 覆盖成本，新 SKU 追加，去掉空行后立即计算。
+    /// 将店小秘命中行导入速卖通7 表：按 SKU 覆盖成本与重量，新 SKU 追加，去掉空行后立即计算。
     /// </summary>
     public int ImportHits(IReadOnlyList<ProductResultRow> hits)
     {
@@ -88,7 +88,7 @@ public partial class JoomPricingView : UserControl
                     _rows.RemoveAt(i);
             }
 
-            var bySku = new Dictionary<string, JoomRow>(StringComparer.OrdinalIgnoreCase);
+            var bySku = new Dictionary<string, Smt7Row>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in _rows)
             {
                 var key = NormalizeSku(row.Sku);
@@ -105,18 +105,21 @@ public partial class JoomPricingView : UserControl
                 var cost = hit.Price.HasValue
                     ? (double)Math.Round(hit.Price.Value, 2, MidpointRounding.AwayFromZero)
                     : (double?)null;
+                var weight = hit.Weight.HasValue ? (double)hit.Weight.Value : (double?)null;
 
                 if (bySku.TryGetValue(sku, out var existing))
                 {
                     existing.Cost = cost;
+                    existing.Weight = weight;
                     imported++;
                 }
                 else
                 {
-                    var row = new JoomRow
+                    var row = new Smt7Row
                     {
                         Sku = hit.Sku.Trim(),
-                        Cost = cost
+                        Cost = cost,
+                        Weight = weight
                     };
                     _rows.Add(row);
                     bySku[sku] = row;
@@ -130,7 +133,7 @@ public partial class JoomPricingView : UserControl
         {
             _suppressAutoCalc = false;
             RecalculateAll();
-            SetStatus($"已导入 {imported} 条到 JOOM 并完成计算。");
+            SetStatus($"已导入 {imported} 条到速卖通7 并完成计算。");
         }
 
         return imported;
@@ -139,7 +142,6 @@ public partial class JoomPricingView : UserControl
     public void RecalculateAll()
     {
         CommitGrid();
-        var settings = ReadSettings();
         var okCount = 0;
         var skipCount = 0;
         var errCount = 0;
@@ -164,12 +166,16 @@ public partial class JoomPricingView : UserControl
 
             try
             {
-                var result = JoomCalculator.Calculate(row.Cost.Value, settings);
+                var result = Smt7Calculator.Calculate(row.Cost.Value, row.Weight, _calcSettings);
+                row.ConvertedWeight = FormatMoney(result.ConvertedWeightGrams);
                 row.Interval = result.Interval;
-                row.Commission = FormatPercent(result.Commission);
-                row.Margin = FormatPercent(result.Margin);
-                row.PriceUsd = FormatMoney(result.PriceUsd);
-                row.ProfitCny = FormatMoney(result.ProfitCny);
+                row.Margin = result.Margin;
+                row.Factor1 = FormatMoney(result.Factor1);
+                row.Constant = FormatMoney(result.Constant);
+                row.Factor2 = FormatMoney(result.Factor2);
+                row.RetailPrice = FormatMoney(result.RetailPrice);
+                row.Markup = FormatMoney(result.Markup);
+                row.FinalPrice = FormatMoney(result.FinalPrice);
                 row.Status = "OK";
                 okCount++;
             }
@@ -182,7 +188,7 @@ public partial class JoomPricingView : UserControl
         }
 
         UpdateCount();
-        SetStatus($"JOOM 计算完成：成功 {okCount} · 跳过 {skipCount} · 失败 {errCount}");
+        SetStatus($"速卖通7 计算完成：成功 {okCount} · 跳过 {skipCount} · 失败 {errCount}");
     }
 
     public void RefreshCount() => UpdateCount();
@@ -196,10 +202,10 @@ public partial class JoomPricingView : UserControl
 
         CommitGrid();
         PersistProductUrl();
-        if (!JoomProductService.TryParseProduct(ProductUrlBox.Text, out var productId, out var editUrl))
+        if (!ChoiceProductService.TryParseProduct(ProductUrlBox.Text, out var productId, out var editUrl))
         {
             MessageBox.Show(
-                "请填写店小秘 JOOM 产品详情链接，例如：\nhttps://www.dianxiaomi.com/web/joomProduct/edit?id=184807701445417881",
+                "请填写店小秘速卖通全托管产品详情链接，例如：\nhttps://www.dianxiaomi.com/web/smtChoice/edit?id=184807706170558289",
                 "提示",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -220,15 +226,14 @@ public partial class JoomPricingView : UserControl
         _busy = true;
         try
         {
-            SetStatus("正在打开 JOOM 产品详情页并读取变种 SKU…");
+            SetStatus("正在打开速卖通产品详情页并读取变种 SKU…");
             await OpenProductWindowAsync(new Uri(editUrl), cookies);
 
-            var detail = await _joomProduct.GetDetailAsync(productId, cookieHeader);
-            LoadUniqueSkus(detail);
+            var uniqueSkus = await ReadSkusWithFallbackAsync(productId, cookieHeader);
+            LoadUniqueSkus(uniqueSkus);
             _openedEditUrl = editUrl;
-            var name = string.IsNullOrWhiteSpace(detail.Name) ? "" : "「" + detail.Name + "」";
-            SetStatus($"已读取{name}变种 SKU {detail.UniqueSkus.Count} 个（已去重）。请按需修改「搜索SKU」后点「搜索并定价」。");
-            _productWindow?.SetHint("已读取变种 SKU。在工作台编辑搜索 SKU 并定价后，点「回写MSRP和价格」。");
+            SetStatus($"已读取变种 SKU {uniqueSkus.Count} 个（已去重）。请按需修改「搜索SKU」后点「搜索并定价」。");
+            _productWindow?.SetHint("已读取变种 SKU。在工作台编辑搜索 SKU 并定价后，点「回写供货价」。");
         }
         catch (Exception ex)
         {
@@ -242,6 +247,26 @@ public partial class JoomPricingView : UserControl
         {
             _busy = false;
         }
+    }
+
+    private async Task<IReadOnlyList<ChoiceVariantSkuGroup>> ReadSkusWithFallbackAsync(string productId, string cookieHeader)
+    {
+        try
+        {
+            if (_productWindow is not null)
+            {
+                var pageSkus = await _productWindow.ReadUniqueSkuCodesAsync();
+                if (pageSkus.Count > 0)
+                    return pageSkus.Select(sku => new ChoiceVariantSkuGroup { PageSku = sku, VariantCount = 1 }).ToList();
+            }
+        }
+        catch
+        {
+            // 页面尚未就绪时改走接口
+        }
+
+        var detail = await _choiceProduct.GetDetailAsync(productId, cookieHeader);
+        return detail.UniqueSkus;
     }
 
     private async void SearchAndPrice_Click(object sender, RoutedEventArgs e)
@@ -273,7 +298,7 @@ public partial class JoomPricingView : UserControl
         _busy = true;
         try
         {
-            SetStatus($"正在按 {searchValues.Count} 个搜索 SKU 查询参考价…");
+            SetStatus($"正在按 {searchValues.Count} 个搜索 SKU 查询参考价与重量…");
             var outcome = await _productSearch.SearchAsync(searchValues, cookieHeader);
             ApplySearchHits(outcome);
             RecalculateAll();
@@ -303,7 +328,7 @@ public partial class JoomPricingView : UserControl
         var prices = CollectPageSkuPrices();
         if (prices.Count == 0)
         {
-            MessageBox.Show("没有可回写的行。请先打开产品详情、完成「搜索并定价」，并确保售价已算出。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("没有可回写的行。请先打开产品详情、完成「搜索并定价」，并确保最终价已算出。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -316,21 +341,21 @@ public partial class JoomPricingView : UserControl
 
         var editUrl = _openedEditUrl;
         if (string.IsNullOrWhiteSpace(editUrl)
-            && JoomProductService.TryParseProduct(ProductUrlBox.Text, out _, out var parsedUrl))
+            && ChoiceProductService.TryParseProduct(ProductUrlBox.Text, out _, out var parsedUrl))
         {
             editUrl = parsedUrl;
         }
 
         if (string.IsNullOrWhiteSpace(editUrl))
         {
-            MessageBox.Show("请先打开 JOOM 产品详情页。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("请先打开速卖通产品详情页。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         _busy = true;
         try
         {
-            SetStatus("正在把售价写入详情页 MSRP 和价格…");
+            SetStatus("正在把最终价写入详情页供货价…");
             await OpenProductWindowAsync(new Uri(editUrl), cookies, reload: false);
             var result = await _productWindow!.WritePricesAsync(prices);
             if (!string.IsNullOrWhiteSpace(result.Error) && result.Updated == 0)
@@ -343,7 +368,7 @@ public partial class JoomPricingView : UserControl
             var missed = result.MissedPageSkus.Count == 0
                 ? ""
                 : $"；未匹配 {result.MissedPageSkus.Count} 个页面 SKU";
-            var hint = $"已写入 {result.Updated} 条变种的 MSRP 和价格{missed}。请在店小秘页面确认后点击保存/发布。";
+            var hint = $"已写入 {result.Updated} 条变种的供货价{missed}。请在店小秘页面确认后点击保存/发布。";
             _productWindow.SetHint(hint);
             SetStatus(hint);
             if (result.MissedPageSkus.Count > 0)
@@ -371,8 +396,7 @@ public partial class JoomPricingView : UserControl
         var owner = Window.GetWindow(this);
         if (_productWindow is null)
         {
-            // 不设 Owner：否则详情窗会一直压在工作台上面，挡住定价页
-            _productWindow = new JoomProductPageWindow();
+            _productWindow = new Smt7ProductPageWindow();
             _productWindow.Closed += ProductWindow_Closed;
             _productWindow.Show();
         }
@@ -393,15 +417,15 @@ public partial class JoomPricingView : UserControl
             _productWindow = null;
     }
 
-    private void LoadUniqueSkus(JoomProductDetail detail)
+    private void LoadUniqueSkus(IReadOnlyList<ChoiceVariantSkuGroup> uniqueSkus)
     {
         _suppressAutoCalc = true;
         try
         {
             _rows.Clear();
-            foreach (var group in detail.UniqueSkus)
+            foreach (var group in uniqueSkus)
             {
-                _rows.Add(new JoomRow
+                _rows.Add(new Smt7Row
                 {
                     PageSku = group.PageSku,
                     Sku = group.PageSku
@@ -479,9 +503,9 @@ public partial class JoomPricingView : UserControl
         foreach (var row in _rows)
         {
             var pageSku = NormalizeSku(row.PageSku);
-            if (pageSku.Length == 0 || string.IsNullOrWhiteSpace(row.PriceUsd) || row.Status != "OK")
+            if (pageSku.Length == 0 || string.IsNullOrWhiteSpace(row.FinalPrice) || row.Status != "OK")
                 continue;
-            map.TryAdd(pageSku, row.PriceUsd);
+            map.TryAdd(pageSku, row.FinalPrice);
         }
 
         return map;
@@ -534,7 +558,7 @@ public partial class JoomPricingView : UserControl
 
     private void AddRow_Click(object sender, RoutedEventArgs e)
     {
-        _rows.Add(new JoomRow { Index = _rows.Count + 1 });
+        _rows.Add(new Smt7Row { Index = _rows.Count + 1 });
         UpdateCount();
         PricingGrid.SelectedItem = _rows[^1];
         PricingGrid.ScrollIntoView(_rows[^1]);
@@ -544,10 +568,10 @@ public partial class JoomPricingView : UserControl
     {
         var selected = PricingGrid.SelectedCells
             .Select(c => c.Item)
-            .OfType<JoomRow>()
+            .OfType<Smt7Row>()
             .Distinct()
             .ToList();
-        if (selected.Count == 0 && PricingGrid.CurrentItem is JoomRow current)
+        if (selected.Count == 0 && PricingGrid.CurrentItem is Smt7Row current)
             selected.Add(current);
 
         foreach (var row in selected)
@@ -579,11 +603,11 @@ public partial class JoomPricingView : UserControl
     private async void CopySkuPrice_Click(object sender, RoutedEventArgs e)
     {
         var lines = _rows
-            .Where(r => !string.IsNullOrWhiteSpace(r.Sku) && !string.IsNullOrWhiteSpace(r.PriceUsd))
+            .Where(r => !string.IsNullOrWhiteSpace(r.Sku) && !string.IsNullOrWhiteSpace(r.FinalPrice))
             .ToList();
         if (lines.Count == 0)
         {
-            MessageBox.Show("暂无可复制的 SKU 和售价。请先计算。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("暂无可复制的 SKU 和最终价。请先计算。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -591,7 +615,7 @@ public partial class JoomPricingView : UserControl
         foreach (var row in lines)
         {
             var sku = (row.Sku ?? string.Empty).Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
-            tsv.Append(sku).Append('\t').Append(row.PriceUsd).Append("\r\n");
+            tsv.Append(sku).Append('\t').Append(row.FinalPrice).Append("\r\n");
         }
 
         var owner = Window.GetWindow(this);
@@ -600,14 +624,14 @@ public partial class JoomPricingView : UserControl
             await Task.Delay(150);
             if (ClipboardHelper.TrySetText(tsv.ToString(), owner))
             {
-                SetStatus($"已复制 {lines.Count} 行 SKU+售价（可直接粘贴到 Excel）。");
+                SetStatus($"已复制 {lines.Count} 行 SKU+最终价（可直接粘贴到 Excel）。");
                 return;
             }
 
             var fallback = new CopyFallbackWindow(tsv.ToString()) { Owner = owner };
             fallback.ShowDialog();
             SetStatus(fallback.DialogResult == true
-                ? $"已复制 {lines.Count} 行 SKU+售价。"
+                ? $"已复制 {lines.Count} 行 SKU+最终价。"
                 : "已打开手动复制窗口（剪贴板被占用）。");
         }
         catch (Exception ex)
@@ -617,13 +641,6 @@ public partial class JoomPricingView : UserControl
         }
     }
 
-    private void Param_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (_suppressAutoCalc || AutoCalcCheck.IsChecked != true)
-            return;
-        RecalculateAll();
-    }
-
     private void PricingGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
     {
         if (_suppressAutoCalc || AutoCalcCheck.IsChecked != true)
@@ -631,34 +648,11 @@ public partial class JoomPricingView : UserControl
         Dispatcher.BeginInvoke(RecalculateAll, System.Windows.Threading.DispatcherPriority.Background);
     }
 
-    private JoomSettings ReadSettings()
-    {
-        return new JoomSettings
-        {
-            ExchangeRate = ReadDouble(RateBox, JoomSettings.DefaultExchangeRate),
-            Low = new JoomTierParams
-            {
-                Commission = ReadPercent(LowCommissionBox, 15),
-                Margin = ReadPercent(LowMarginBox, 50)
-            },
-            Mid = new JoomTierParams
-            {
-                Commission = ReadPercent(MidCommissionBox, 15),
-                Margin = ReadPercent(MidMarginBox, 45)
-            },
-            High = new JoomTierParams
-            {
-                Commission = ReadPercent(HighCommissionBox, 15),
-                Margin = ReadPercent(HighMarginBox, 40)
-            }
-        };
-    }
-
     private void SeedEmptyRows(int count)
     {
         _rows.Clear();
         for (var i = 0; i < count; i++)
-            _rows.Add(new JoomRow { Index = i + 1 });
+            _rows.Add(new Smt7Row { Index = i + 1 });
         UpdateCount();
     }
 
@@ -681,13 +675,17 @@ public partial class JoomPricingView : UserControl
         PricingGrid.CommitEdit(DataGridEditingUnit.Row, true);
     }
 
-    private static void ClearResult(JoomRow row)
+    private static void ClearResult(Smt7Row row)
     {
+        row.ConvertedWeight = null;
         row.Interval = null;
-        row.Commission = null;
         row.Margin = null;
-        row.PriceUsd = null;
-        row.ProfitCny = null;
+        row.Factor1 = null;
+        row.Constant = null;
+        row.Factor2 = null;
+        row.RetailPrice = null;
+        row.Markup = null;
+        row.FinalPrice = null;
     }
 
     private void SetStatus(string text) => StatusChanged?.Invoke(this, text);
@@ -695,30 +693,4 @@ public partial class JoomPricingView : UserControl
     private static string NormalizeSku(string? sku) => (sku ?? "").Trim();
 
     private static string FormatMoney(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
-
-    private static string FormatPercent(double rate) =>
-        (rate * 100).ToString("0.00", CultureInfo.InvariantCulture) + "%";
-
-    private static double ReadDouble(TextBox box, double fallback)
-    {
-        var raw = box.Text?.Trim();
-        if (string.IsNullOrEmpty(raw))
-            return fallback;
-        return TryParseDouble(raw, out var v) ? v : fallback;
-    }
-
-    private static double ReadPercent(TextBox box, double fallbackPercent)
-    {
-        var raw = box.Text?.Trim().TrimEnd('%').Trim();
-        if (string.IsNullOrEmpty(raw) || !TryParseDouble(raw, out var v))
-            return fallbackPercent / 100.0;
-        return v / 100.0;
-    }
-
-    private static bool TryParseDouble(string text, out double value)
-    {
-        text = text.Trim().Replace(",", "");
-        return double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value)
-               || double.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
-    }
 }
