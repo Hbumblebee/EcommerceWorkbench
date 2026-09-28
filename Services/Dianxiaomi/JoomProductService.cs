@@ -4,6 +4,8 @@
  *           发布前按变种 SKU 精确查询采集箱、待发布、在线产品，返回已占用的产品与编辑链接。
  * 创建日期：2026-09-05
  * 修改记录：2026-09-28 增加 SKU 占用查询（采集箱 / 待发布 / 在线）
+ *           2026-09-28 占用结果带上店铺名称
+ *           2026-09-28 SKU 占用改为检查全部店铺
  */
 
 using System.Collections.Concurrent;
@@ -33,6 +35,7 @@ public sealed class JoomSkuOccupancy
     public string ProductId { get; init; } = "";
     public string EditUrl { get; init; } = "";
     public string ParentSku { get; init; } = "";
+    public string ShopName { get; init; } = "";
 }
 
 public sealed class JoomSkuOccupancyReport
@@ -51,6 +54,7 @@ public sealed class JoomProductService
 {
     public const string EditJsonUrl = "https://www.dianxiaomi.com/api/joomProduct/edit.json";
     public const string PageListUrl = "https://www.dianxiaomi.com/api/joomProduct/pageList.json";
+    public const string UserInfoUrl = "https://www.dianxiaomi.com/api/userIn.json";
     private const int PageSize = 100;
     private const int MaxPagesPerLocation = 5;
     private const int EditFallbackBudget = 40;
@@ -149,13 +153,12 @@ public sealed class JoomProductService
     }
 
     /// <summary>
-    /// 按变种 SKU 精确查找已被占用的产品。同一店铺内才算重复；当前产品自身不算占用。
+    /// 按变种 SKU 精确查找已被占用的产品。检查全部店铺；当前产品自身不算占用。
     /// 查询范围与店小秘发布校验一致：采集箱、待发布（含发布中/失败/定时）、在线各状态。
     /// </summary>
     public async Task<JoomSkuOccupancyReport> FindOccupanciesAsync(
         IReadOnlyList<string> skus,
         string? currentProductId,
-        string? shopId,
         string cookieHeader,
         CancellationToken cancellationToken = default)
     {
@@ -175,7 +178,7 @@ public sealed class JoomProductService
             return new JoomSkuOccupancyReport();
 
         var searchValue = string.Join(",", wanted.Keys);
-        var shop = NormalizeShopId(shopId);
+        var shopNames = await LoadShopNamesAsync(cookieHeader, cancellationToken);
         var currentId = (currentProductId ?? "").Trim();
         var hits = new ConcurrentBag<JoomSkuOccupancy>();
         var failures = new ConcurrentBag<string>();
@@ -186,7 +189,7 @@ public sealed class JoomProductService
         var tasks = Locations.Select(location => ScanLocationAsync(
             location,
             searchValue,
-            shop,
+            shopNames,
             currentId,
             wanted,
             cookieHeader,
@@ -217,6 +220,7 @@ public sealed class JoomProductService
 
         var ordered = hits
             .OrderBy(h => h.Sku, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(h => h.ShopName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(h => h.Location, StringComparer.Ordinal)
             .ThenBy(h => h.ProductName, StringComparer.Ordinal)
             .ToList();
@@ -231,7 +235,7 @@ public sealed class JoomProductService
     private async Task ScanLocationAsync(
         JoomListLocation location,
         string searchValue,
-        string? shopId,
+        IReadOnlyDictionary<string, string> shopNames,
         string currentProductId,
         Dictionary<string, string> wanted,
         string cookieHeader,
@@ -247,7 +251,7 @@ public sealed class JoomProductService
             var pageNo = 1;
             while (pageNo <= MaxPagesPerLocation)
             {
-                var body = BuildListBody(pageNo, searchValue, shopId, location.Extra);
+                var body = BuildListBody(pageNo, searchValue, shopId: null, location.Extra);
                 var (status, responseBody) = await _apiClient.SendAsync(
                     "POST",
                     PageListUrl,
@@ -288,10 +292,6 @@ public sealed class JoomProductService
                         continue;
 
                     var itemShop = NormalizeShopId(GetString(item, "shopId"));
-                    if (shopId is not null && itemShop is not null
-                        && !itemShop.Equals(shopId, StringComparison.OrdinalIgnoreCase))
-                        continue;
-
                     var visible = ReadVisibleSkus(item);
                     if (!visible.Any(wanted.ContainsKey))
                     {
@@ -306,6 +306,10 @@ public sealed class JoomProductService
 
                     var parentSku = GetString(item, "parentSku").Trim();
                     var name = FirstNonEmpty(GetString(item, "name"), GetString(item, "title"));
+                    var resolvedShop = itemShop;
+                    var shopName = "";
+                    if (resolvedShop is not null && shopNames.TryGetValue(resolvedShop, out var foundShopName))
+                        shopName = foundShopName;
                     foreach (var found in visible)
                     {
                         if (!wanted.TryGetValue(found, out var displaySku))
@@ -320,7 +324,8 @@ public sealed class JoomProductService
                             ProductName = name,
                             ProductId = productId,
                             EditUrl = BuildEditUrl(productId),
-                            ParentSku = parentSku.Equals(displaySku, StringComparison.OrdinalIgnoreCase) ? "" : parentSku
+                            ParentSku = parentSku.Equals(displaySku, StringComparison.OrdinalIgnoreCase) ? "" : parentSku,
+                            ShopName = shopName
                         });
                     }
                 }
@@ -375,6 +380,63 @@ public sealed class JoomProductService
         {
             return [];
         }
+    }
+
+    private async Task<Dictionary<string, string>> LoadShopNamesAsync(
+        string cookieHeader,
+        CancellationToken cancellationToken)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var (status, body) = await _apiClient.SendAsync(
+                "GET",
+                UserInfoUrl,
+                cookieHeader,
+                body: null,
+                contentType: "application/json",
+                cancellationToken,
+                referer: "https://www.dianxiaomi.com/web/joomProduct/online");
+            if (status is < 200 or >= 300)
+                return map;
+
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            var data = root;
+            if (root.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.Object)
+                data = dataEl;
+            if (!data.TryGetProperty("shopMap", out var shopMap) || shopMap.ValueKind != JsonValueKind.Object)
+                return map;
+
+            foreach (var prop in shopMap.EnumerateObject())
+            {
+                if (prop.Value.ValueKind != JsonValueKind.Object)
+                    continue;
+                var name = FirstNonEmpty(GetString(prop.Value, "name"), GetString(prop.Value, "shopName"));
+                if (name.Length == 0)
+                    continue;
+                RememberShopName(map, prop.Name, name);
+                RememberShopName(map, GetString(prop.Value, "idStr"), name);
+                RememberShopName(map, GetString(prop.Value, "id"), name);
+            }
+        }
+        catch (JsonException)
+        {
+            // 店铺名解析失败时，提示里退回「当前店铺」
+        }
+        catch (Exception ex) when (!IsAuthFailure(ex.Message))
+        {
+            // 店铺列表失败不阻断 SKU 占用检查
+        }
+
+        return map;
+    }
+
+    private static void RememberShopName(Dictionary<string, string> map, string? rawId, string name)
+    {
+        var id = NormalizeShopId(rawId);
+        if (id is not null)
+            map.TryAdd(id, name);
     }
 
     private static bool TryReadPage(JsonElement data, out JsonElement list, out int totalPage)

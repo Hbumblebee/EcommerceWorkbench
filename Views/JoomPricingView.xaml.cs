@@ -8,6 +8,8 @@
  *           2026-09-28 「打开该产品」改用店小秘详情窗口，不再调用系统浏览器
  *           2026-09-28 「打开该产品」另开窗口，不覆盖正在定价的详情页
  *           2026-09-28 分档参数默认折叠，产品详情与产品重复可折叠
+ *           2026-09-28 产品重复提示改为写出占用店铺名称
+ *           2026-09-28 SKU 占用改为检查全部店铺
  */
 
 using System.Collections.ObjectModel;
@@ -39,7 +41,6 @@ public partial class JoomPricingView : UserControl
     private int _occupancyWindowSeq;
     private string? _openedEditUrl;
     private string? _openedProductId;
-    private string? _openedShopId;
     private readonly ObservableCollection<OccupancyLine> _occupancies = [];
 
     public event EventHandler<string>? StatusChanged;
@@ -251,7 +252,6 @@ public partial class JoomPricingView : UserControl
             LoadUniqueSkus(detail);
             _openedEditUrl = editUrl;
             _openedProductId = detail.Id;
-            _openedShopId = detail.ShopId;
             var name = string.IsNullOrWhiteSpace(detail.Name) ? "" : "「" + detail.Name + "」";
             var loaded = $"已读取{name}变种 SKU {detail.UniqueSkus.Count} 个（已去重）。";
             try
@@ -700,15 +700,16 @@ public partial class JoomPricingView : UserControl
         if (string.IsNullOrWhiteSpace(cookieHeader) || skus.Count == 0)
             return "未检查 SKU 占用。";
 
-        SetStatus($"正在检查 {skus.Count} 个 SKU 是否已被其他 JOOM 产品占用…");
-        var report = await _joomProduct.FindOccupanciesAsync(skus, _openedProductId, _openedShopId, cookieHeader);
+        SetStatus($"正在检查 {skus.Count} 个 SKU 是否已被各店铺的 JOOM 产品占用…");
+        var report = await _joomProduct.FindOccupanciesAsync(skus, _openedProductId, cookieHeader);
         foreach (var hit in report.Hits)
         {
             var name = string.IsNullOrWhiteSpace(hit.ProductName) ? "未命名产品 " + hit.ProductId : hit.ProductName;
+            var shop = string.IsNullOrWhiteSpace(hit.ShopName) ? "" : "「" + hit.ShopName + "」 · ";
             var parent = string.IsNullOrWhiteSpace(hit.ParentSku) ? "" : " · Parent SKU " + hit.ParentSku;
             _occupancies.Add(new OccupancyLine
             {
-                Summary = hit.Sku + " · " + hit.Location + " · 「" + name + "」" + parent,
+                Summary = hit.Sku + " · " + shop + hit.Location + " · 「" + name + "」" + parent,
                 EditUrl = hit.EditUrl
             });
         }
@@ -719,7 +720,15 @@ public partial class JoomPricingView : UserControl
                 .Select(h => h.Sku)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count();
-            OccupancyTitle.Text = skuCount + " 个 SKU 已被同一店铺的其他产品占用，直接发布会提示「产品重复」";
+            var shopNames = report.Hits
+                .Select(h => h.ShopName)
+                .Where(n => n.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var occupiedBy = shopNames.Count == 0
+                ? "当前店铺"
+                : string.Join("、", shopNames.Select(n => "「" + n + "」"));
+            OccupancyTitle.Text = skuCount + " 个 SKU 已被" + occupiedBy + "店铺占用，直接发布会提示「产品重复」";
             OccupancyExpander.IsExpanded = true;
             OccupancyPanel.Visibility = Visibility.Visible;
         }
@@ -728,7 +737,7 @@ public partial class JoomPricingView : UserControl
             ? ""
             : " 以下范围未完整核对：" + string.Join("、", report.FailedLocations) + "。";
         if (_occupancies.Count == 0)
-            return "已检查 " + skus.Count + " 个 SKU，采集箱、待发布、在线产品中没有其他占用。" + failed;
+            return "已检查 " + skus.Count + " 个 SKU，各店铺的采集箱、待发布、在线产品中没有其他占用。" + failed;
 
         return "发现 " + _occupancies.Count + " 处 SKU 占用，发布前请先更换 SKU，或处理下面列出的产品。" + failed;
     }

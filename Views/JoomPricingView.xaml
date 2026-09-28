@@ -237,7 +237,7 @@
                                    Foreground="{StaticResource TextBrush}"/>
                     </Expander.Header>
                     <StackPanel>
-                <TextBlock Text="维护店小秘编辑链接（如 https://www.dianxiaomi.com/web/joomProduct/edit?id=…）。打开后读取【变种信息】唯一 SKU，并检查这些 SKU 是否已被同一店铺的采集箱、待发布或在线产品占用；可改「搜索SKU」再定价，回写时仍按「页面SKU」一对一匹配。"
+                <TextBlock Text="维护店小秘编辑链接（如 https://www.dianxiaomi.com/web/joomProduct/edit?id=…）。打开后读取【变种信息】唯一 SKU，并检查这些 SKU 是否已在全部店铺的采集箱、待发布或在线产品中被占用；可改「搜索SKU」再定价，回写时仍按「页面SKU」一对一匹配。"
                            Foreground="{StaticResource MutedBrush}"
                            TextWrapping="Wrap"
                            Margin="0,0,0,8"/>
