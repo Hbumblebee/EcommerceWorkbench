@@ -2,6 +2,7 @@
  * 功能说明：用已导出 Cookie 打开店小秘 JOOM 产品编辑页，并向变种表写入 MSRP/价格。
  * 创建日期：2026-09-05
  * 更新日期：2026-09-12 详情页为独立窗口，不压在工作台上面
+ * 修改记录：2026-09-28 多个详情窗共用同一个 WebView2 环境，避免后开窗口占用用户数据目录失败
  */
 
 using System.IO;
@@ -14,6 +15,9 @@ namespace EcommerceWorkbench.Views;
 
 public partial class JoomProductPageWindow : Window
 {
+    private static CoreWebView2Environment? _sharedEnvironment;
+    private static readonly SemaphoreSlim EnvironmentLock = new(1, 1);
+
     private bool _coreReady;
     private bool _finderInstalled;
 
@@ -70,9 +74,7 @@ public partial class JoomProductPageWindow : Window
         if (_coreReady && Browser.CoreWebView2 is not null)
             return;
 
-        var userData = Path.Combine(AppPaths.DataDirectory, "webview-joom");
-        Directory.CreateDirectory(userData);
-        var env = await CoreWebView2Environment.CreateAsync(userDataFolder: userData);
+        var env = await GetSharedEnvironmentAsync();
         await Browser.EnsureCoreWebView2Async(env);
         var core = Browser.CoreWebView2
             ?? throw new InvalidOperationException("WebView2 初始化失败。");
@@ -84,6 +86,28 @@ public partial class JoomProductPageWindow : Window
         }
 
         _coreReady = true;
+    }
+
+    private static async Task<CoreWebView2Environment> GetSharedEnvironmentAsync()
+    {
+        if (_sharedEnvironment is not null)
+            return _sharedEnvironment;
+
+        await EnvironmentLock.WaitAsync();
+        try
+        {
+            if (_sharedEnvironment is not null)
+                return _sharedEnvironment;
+
+            var userData = Path.Combine(AppPaths.DataDirectory, "webview-joom");
+            Directory.CreateDirectory(userData);
+            _sharedEnvironment = await CoreWebView2Environment.CreateAsync(userDataFolder: userData);
+            return _sharedEnvironment;
+        }
+        finally
+        {
+            EnvironmentLock.Release();
+        }
     }
 
     private void InjectCookies(IReadOnlyList<CookieRecord> cookies)

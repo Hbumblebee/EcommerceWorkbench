@@ -59,6 +59,57 @@
             <Setter Property="HorizontalContentAlignment" Value="Right"/>
             <Setter Property="Padding" Value="6,4"/>
         </Style>
+        <Style x:Key="SectionExpander" TargetType="Expander">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <StackPanel>
+                            <ToggleButton IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          Content="{TemplateBinding Header}"
+                                          Background="Transparent"
+                                          BorderThickness="0"
+                                          HorizontalContentAlignment="Stretch"
+                                          Cursor="Hand"
+                                          Focusable="False"
+                                          Padding="0">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent" Padding="0,1">
+                                            <DockPanel>
+                                                <TextBlock x:Name="Chevron"
+                                                           DockPanel.Dock="Left"
+                                                           Text="▸"
+                                                           Width="16"
+                                                           FontSize="12"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Expander}}"/>
+                                                <ContentPresenter Content="{TemplateBinding Content}"
+                                                                  VerticalAlignment="Center"/>
+                                            </DockPanel>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Chevron" Property="Text" Value="▾"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ExpandSite" Visibility="Collapsed" Margin="0,8,0,0"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="True">
+                                <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Grid>
@@ -94,10 +145,12 @@
                 Padding="14,10"
                 Margin="0,10,0,8">
             <StackPanel>
-                <TextBlock Text="分档参数 · 默认值对齐 JOOM1.0（佣金三档均为 15%，毛利率随成本升高递减）"
-                           Foreground="{StaticResource MutedBrush}"
-                           Margin="0,0,0,8"/>
-                <WrapPanel>
+                <Expander Style="{StaticResource SectionExpander}" IsExpanded="False">
+                    <Expander.Header>
+                        <TextBlock Text="分档参数 · 默认值对齐 JOOM1.0（佣金三档均为 15%，毛利率随成本升高递减）"
+                                   Foreground="{StaticResource MutedBrush}"/>
+                    </Expander.Header>
+                    <WrapPanel>
                     <Border Background="#FFF3E0" Padding="10,8" Margin="0,0,14,8" CornerRadius="4">
                         <StackPanel>
                             <TextBlock Text="汇率 CNY→USD" FontWeight="Bold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,6"/>
@@ -156,8 +209,9 @@
                               IsChecked="True"
                               VerticalAlignment="Center"
                               Margin="8,22,0,8"/>
-                </WrapPanel>
-                <WrapPanel Margin="0,4,0,0">
+                    </WrapPanel>
+                </Expander>
+                <WrapPanel Margin="0,8,0,0">
                     <Button Content="批量计算 (F5)" Style="{StaticResource OrangeButton}" Click="Calc_Click"
                             ToolTip="按当前分档参数重算全部行的售价与利润"/>
                     <Button Content="添加行" Style="{StaticResource GhostButton}" Click="AddRow_Click"/>
@@ -176,11 +230,14 @@
                 Padding="14,10"
                 Margin="0,0,0,8">
             <StackPanel>
-                <TextBlock Text="JOOM 产品详情"
-                           FontWeight="Bold"
-                           Foreground="{StaticResource TextBrush}"
-                           Margin="0,0,0,6"/>
-                <TextBlock Text="维护店小秘编辑链接（如 https://www.dianxiaomi.com/web/joomProduct/edit?id=…）。打开后读取【变种信息】唯一 SKU；可改「搜索SKU」再定价，回写时仍按「页面SKU」一对一匹配。"
+                <Expander Style="{StaticResource SectionExpander}" IsExpanded="True">
+                    <Expander.Header>
+                        <TextBlock Text="JOOM 产品详情"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource TextBrush}"/>
+                    </Expander.Header>
+                    <StackPanel>
+                <TextBlock Text="维护店小秘编辑链接（如 https://www.dianxiaomi.com/web/joomProduct/edit?id=…）。打开后读取【变种信息】唯一 SKU，并检查这些 SKU 是否已被同一店铺的采集箱、待发布或在线产品占用；可改「搜索SKU」再定价，回写时仍按「页面SKU」一对一匹配。"
                            Foreground="{StaticResource MutedBrush}"
                            TextWrapping="Wrap"
                            Margin="0,0,0,8"/>
@@ -206,9 +263,50 @@
                     <Button Content="回写MSRP和价格"
                             Style="{StaticResource SuccessButton}"
                             Click="WriteBack_Click"
-                            Margin="0"
                             ToolTip="把售价写入详情页变种表的 MSRP 和价格列，请再在店小秘页面保存"/>
+                    <Button Content="检查SKU占用"
+                            Style="{StaticResource GhostButton}"
+                            Click="CheckOccupancy_Click"
+                            Margin="0"
+                            ToolTip="用当前「页面SKU」查询采集箱、待发布、在线产品，列出已占用该 SKU 的产品和编辑链接"/>
                 </WrapPanel>
+                <Border x:Name="OccupancyPanel"
+                        Visibility="Collapsed"
+                        Background="#FEF2F2"
+                        BorderBrush="#FECACA"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="10,8"
+                        Margin="0,10,0,0">
+                    <Expander x:Name="OccupancyExpander"
+                              Style="{StaticResource SectionExpander}"
+                              IsExpanded="True"
+                              Foreground="#B91C1C">
+                        <Expander.Header>
+                            <TextBlock x:Name="OccupancyTitle"
+                                       Foreground="#B91C1C"
+                                       FontWeight="Bold"
+                                       TextWrapping="Wrap"/>
+                        </Expander.Header>
+                        <ScrollViewer MaxHeight="168" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl x:Name="OccupancyList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Margin="0,2,0,2" TextWrapping="Wrap">
+                                            <Run Text="{Binding Summary}" Foreground="#7F1D1D"/>
+                                            <Run Text="  "/>
+                                            <Hyperlink Click="OccupancyLink_Click"
+                                                       Tag="{Binding EditUrl}"
+                                                       Foreground="#1D4ED8">打开该产品</Hyperlink>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Expander>
+                </Border>
+                    </StackPanel>
+                </Expander>
             </StackPanel>
         </Border>
 

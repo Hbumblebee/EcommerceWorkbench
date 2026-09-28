@@ -4,6 +4,10 @@
  *           也可打开 JOOM 产品详情页读取变种 SKU，搜索定价后回写 MSRP/价格。
  * 创建日期：2026-09-05
  * 更新日期：2026-09-12 打开详情页后回到工作台，避免弹窗盖住定价页
+ * 修改记录：2026-09-28 打开产品后检查变种 SKU 是否已被其他 JOOM 产品占用，并给出编辑链接
+ *           2026-09-28 「打开该产品」改用店小秘详情窗口，不再调用系统浏览器
+ *           2026-09-28 「打开该产品」另开窗口，不覆盖正在定价的详情页
+ *           2026-09-28 分档参数默认折叠，产品详情与产品重复可折叠
  */
 
 using System.Collections.ObjectModel;
@@ -11,6 +15,7 @@ using System.Globalization;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using EcommerceWorkbench.Models;
 using EcommerceWorkbench.Services;
 using EcommerceWorkbench.Services.Dianxiaomi;
@@ -30,7 +35,12 @@ public partial class JoomPricingView : UserControl
     private bool _loaded;
     private bool _busy;
     private JoomProductPageWindow? _productWindow;
+    private readonly List<JoomProductPageWindow> _occupancyWindows = [];
+    private int _occupancyWindowSeq;
     private string? _openedEditUrl;
+    private string? _openedProductId;
+    private string? _openedShopId;
+    private readonly ObservableCollection<OccupancyLine> _occupancies = [];
 
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<string>? CountChanged;
@@ -44,6 +54,7 @@ public partial class JoomPricingView : UserControl
         _joomProduct = new JoomProductService(_apiClient);
         _productSearch = new ProductSearchService(_apiClient);
         PricingGrid.ItemsSource = _rows;
+        OccupancyList.ItemsSource = _occupancies;
         Loaded += JoomPricingView_Loaded;
     }
 
@@ -58,7 +69,20 @@ public partial class JoomPricingView : UserControl
             // 关闭详情窗失败不影响退出
         }
 
+        foreach (var window in _occupancyWindows.ToArray())
+        {
+            try
+            {
+                window.Close();
+            }
+            catch
+            {
+                // 关闭占用产品窗口失败不影响退出
+            }
+        }
+
         _productWindow = null;
+        _occupancyWindows.Clear();
         _apiClient.Dispose();
     }
 
@@ -226,9 +250,24 @@ public partial class JoomPricingView : UserControl
             var detail = await _joomProduct.GetDetailAsync(productId, cookieHeader);
             LoadUniqueSkus(detail);
             _openedEditUrl = editUrl;
+            _openedProductId = detail.Id;
+            _openedShopId = detail.ShopId;
             var name = string.IsNullOrWhiteSpace(detail.Name) ? "" : "「" + detail.Name + "」";
-            SetStatus($"已读取{name}变种 SKU {detail.UniqueSkus.Count} 个（已去重）。请按需修改「搜索SKU」后点「搜索并定价」。");
-            _productWindow?.SetHint("已读取变种 SKU。在工作台编辑搜索 SKU 并定价后，点「回写MSRP和价格」。");
+            var loaded = $"已读取{name}变种 SKU {detail.UniqueSkus.Count} 个（已去重）。";
+            try
+            {
+                var occupancy = await DescribeOccupancyAsync(detail.UniqueSkus.Select(s => s.PageSku).ToList());
+                SetStatus(loaded + occupancy);
+            }
+            catch (Exception occupancyEx)
+            {
+                ClearOccupancy();
+                SetStatus(loaded + "占用检查失败：" + occupancyEx.Message);
+                if (IsCookieInvalidError(occupancyEx.Message))
+                    CookieInvalidated?.Invoke(this, occupancyEx.Message);
+            }
+
+            _productWindow?.SetHint("已读取变种 SKU。在工作台编辑搜索 SKU 并定价后，点「回写MSRP和价格」。若上方列出 SKU 占用，请先处理再发布。");
         }
         catch (Exception ex)
         {
@@ -385,6 +424,43 @@ public partial class JoomPricingView : UserControl
             await _productWindow.OpenProductAsync(url, cookies);
 
         owner?.Activate();
+    }
+
+    private async Task OpenOccupancyWindowAsync(Uri url, IReadOnlyList<CookieRecord> cookies)
+    {
+        var existing = _occupancyWindows.FirstOrDefault(w => w.IsShowing(url));
+        if (existing is not null)
+        {
+            if (existing.WindowState == WindowState.Minimized)
+                existing.WindowState = WindowState.Normal;
+            existing.Activate();
+            return;
+        }
+
+        var window = new JoomProductPageWindow
+        {
+            Title = "JOOM 占用产品",
+            WindowStartupLocation = WindowStartupLocation.Manual
+        };
+        var shift = (_occupancyWindowSeq % 8) * 32;
+        _occupancyWindowSeq++;
+        var area = SystemParameters.WorkArea;
+        window.Left = area.Left + 48 + shift;
+        window.Top = area.Top + 48 + shift;
+        window.Closed += OccupancyWindow_Closed;
+        _occupancyWindows.Add(window);
+        window.Show();
+        await window.OpenProductAsync(url, cookies);
+        window.SetHint("这是占用 SKU 的产品。确认页面内容后，可在店小秘里修改并保存。");
+        if (window.WindowState == WindowState.Minimized)
+            window.WindowState = WindowState.Normal;
+        window.Activate();
+    }
+
+    private void OccupancyWindow_Closed(object? sender, EventArgs e)
+    {
+        if (sender is JoomProductPageWindow window)
+            _occupancyWindows.Remove(window);
     }
 
     private void ProductWindow_Closed(object? sender, EventArgs e)
@@ -572,8 +648,151 @@ public partial class JoomPricingView : UserControl
             ClearResult(row);
             row.Status = "";
         }
+        ClearOccupancy();
         SetStatus("已清空全部输入与结果");
         UpdateCount();
+    }
+
+    private async void CheckOccupancy_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+            return;
+
+        CommitGrid();
+        var skus = CollectOccupancySkus();
+        if (skus.Count == 0)
+        {
+            MessageBox.Show("请先打开产品详情读取 SKU，或在表格中填写「页面SKU」。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(GetCookieHeader()))
+        {
+            MessageBox.Show("请先在「店小秘搜索」登录并导出 Cookie。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var occupancy = await DescribeOccupancyAsync(skus);
+            SetStatus(occupancy);
+        }
+        catch (Exception ex)
+        {
+            ClearOccupancy();
+            SetStatus($"SKU 占用检查失败：{ex.Message}");
+            if (IsCookieInvalidError(ex.Message))
+                CookieInvalidated?.Invoke(this, ex.Message);
+            else
+                MessageBox.Show(ex.Message, "SKU 占用检查失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<string> DescribeOccupancyAsync(IReadOnlyList<string> skus)
+    {
+        ClearOccupancy();
+        var cookieHeader = GetCookieHeader();
+        if (string.IsNullOrWhiteSpace(cookieHeader) || skus.Count == 0)
+            return "未检查 SKU 占用。";
+
+        SetStatus($"正在检查 {skus.Count} 个 SKU 是否已被其他 JOOM 产品占用…");
+        var report = await _joomProduct.FindOccupanciesAsync(skus, _openedProductId, _openedShopId, cookieHeader);
+        foreach (var hit in report.Hits)
+        {
+            var name = string.IsNullOrWhiteSpace(hit.ProductName) ? "未命名产品 " + hit.ProductId : hit.ProductName;
+            var parent = string.IsNullOrWhiteSpace(hit.ParentSku) ? "" : " · Parent SKU " + hit.ParentSku;
+            _occupancies.Add(new OccupancyLine
+            {
+                Summary = hit.Sku + " · " + hit.Location + " · 「" + name + "」" + parent,
+                EditUrl = hit.EditUrl
+            });
+        }
+
+        if (_occupancies.Count > 0)
+        {
+            var skuCount = report.Hits
+                .Select(h => h.Sku)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            OccupancyTitle.Text = skuCount + " 个 SKU 已被同一店铺的其他产品占用，直接发布会提示「产品重复」";
+            OccupancyExpander.IsExpanded = true;
+            OccupancyPanel.Visibility = Visibility.Visible;
+        }
+
+        var failed = report.FailedLocations.Count == 0
+            ? ""
+            : " 以下范围未完整核对：" + string.Join("、", report.FailedLocations) + "。";
+        if (_occupancies.Count == 0)
+            return "已检查 " + skus.Count + " 个 SKU，采集箱、待发布、在线产品中没有其他占用。" + failed;
+
+        return "发现 " + _occupancies.Count + " 处 SKU 占用，发布前请先更换 SKU，或处理下面列出的产品。" + failed;
+    }
+
+    private void ClearOccupancy()
+    {
+        _occupancies.Clear();
+        OccupancyTitle.Text = "";
+        OccupancyPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private List<string> CollectOccupancySkus()
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in _rows)
+        {
+            var sku = NormalizeSku(string.IsNullOrWhiteSpace(row.PageSku) ? row.Sku : row.PageSku);
+            if (sku.Length > 0 && seen.Add(sku))
+                result.Add(sku);
+        }
+
+        return result;
+    }
+
+    private async void OccupancyLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Hyperlink link || link.Tag is not string url || string.IsNullOrWhiteSpace(url))
+            return;
+        e.Handled = true;
+        if (_busy)
+            return;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return;
+
+        var cookies = GetCookieRecords();
+        if (cookies is null || cookies.Count == 0)
+        {
+            MessageBox.Show("请先在「店小秘搜索」登录并导出 Cookie。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            SetStatus("正在另开窗口打开占用该 SKU 的产品…");
+            await OpenOccupancyWindowAsync(uri, cookies);
+            SetStatus("已另开窗口打开占用该 SKU 的产品。");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"打开占用产品失败：{ex.Message}");
+            MessageBox.Show(ex.Message, "打开占用产品失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class OccupancyLine
+    {
+        public string Summary { get; init; } = "";
+        public string EditUrl { get; init; } = "";
     }
 
     private async void CopySkuPrice_Click(object sender, RoutedEventArgs e)
