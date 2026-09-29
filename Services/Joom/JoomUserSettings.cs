@@ -1,6 +1,7 @@
 /*
- * 功能说明：JOOM 页本地设置（产品详情链接等）。
+ * 功能说明：JOOM 页本地设置（产品详情链接、SKU 后缀列表等）。
  * 创建日期：2026-09-05
+ * 修改记录：2026-09-29 增加 SKU 通用后缀与颜色后缀
  */
 using System.IO;
 using System.Text.Json;
@@ -14,7 +15,17 @@ public sealed class JoomUserSettings
         WriteIndented = true
     };
 
+    public const string DefaultGeneralSkuSuffixes = "-1，-01，-001，-0001，-00001，AS，AS01，-AS001，-AS001，-AS0001，-AS00001";
+
+    public const string DefaultColorSkuSuffixes = "-grey，-red，-green，-yellow，-black，-blue，-white，-black";
+
     public string ProductEditUrl { get; set; } = "";
+
+    /// <summary>产品重复时按顺序拼接的通用后缀，中英文逗号分隔。</summary>
+    public string GeneralSkuSuffixes { get; set; } = DefaultGeneralSkuSuffixes;
+
+    /// <summary>启用颜色后缀时可选的颜色，中英文逗号分隔，拼在通用后缀之前。</summary>
+    public string ColorSkuSuffixes { get; set; } = DefaultColorSkuSuffixes;
 
     public static string GetFilePath() => Path.Combine(AppPaths.DataDirectory, "joom-settings.json");
 

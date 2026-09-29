@@ -1,7 +1,8 @@
 <UserControl x:Class="EcommerceWorkbench.Views.JoomPricingView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:conv="clr-namespace:EcommerceWorkbench.Converters">
+             xmlns:conv="clr-namespace:EcommerceWorkbench.Converters"
+             SizeChanged="JoomPricingView_SizeChanged">
     <UserControl.Resources>
         <conv:NullableDoubleConverter x:Key="NullableDouble"/>
         <Style x:Key="InputCell" TargetType="TextBlock">
@@ -112,16 +113,12 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-
-        <Border Grid.Row="0"
+    <ScrollViewer x:Name="PageScroll"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+        <StackPanel>
+        <StackPanel x:Name="TopPanel" SizeChanged="TopPanel_SizeChanged">
+        <Border
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="0,0,0,1"
@@ -137,7 +134,7 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="1"
+        <Border
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1"
@@ -222,7 +219,7 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="2"
+        <Border
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1"
@@ -268,8 +265,34 @@
                             Style="{StaticResource GhostButton}"
                             Click="CheckOccupancy_Click"
                             Margin="0"
-                            ToolTip="用当前「页面SKU」查询采集箱、待发布、在线产品，列出已占用该 SKU 的产品和编辑链接"/>
+                            ToolTip="用当前「页面SKU」查询采集箱、待发布、在线产品。若产品重复，按下面的后缀生成可修改的新 SKU"/>
                 </WrapPanel>
+                <TextBlock Text="用中文或英文逗号分隔。产品重复时，去掉原 SKU 第一个「-」及它后面的内容，再从左到右拼接通用后缀，直到不再重复。勾选颜色后缀后需选择颜色，格式如 E0032-red-1。"
+                           Foreground="{StaticResource MutedBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,10,0,8"/>
+                <DockPanel Margin="0,0,0,6">
+                    <TextBlock DockPanel.Dock="Left"
+                               Text="SKU的通用后缀"
+                               VerticalAlignment="Center"
+                               Margin="0,0,10,0"
+                               Foreground="{StaticResource TextBrush}"/>
+                    <TextBox x:Name="GeneralSuffixBox"
+                             VerticalContentAlignment="Center"
+                             ToolTip="可修改。中文逗号或英文逗号分隔，按从左到右的顺序尝试"
+                             LostFocus="SuffixBox_LostFocus"/>
+                </DockPanel>
+                <DockPanel Margin="0,0,0,0">
+                    <TextBlock DockPanel.Dock="Left"
+                               Text="SKU的颜色后缀"
+                               VerticalAlignment="Center"
+                               Margin="0,0,10,0"
+                               Foreground="{StaticResource TextBrush}"/>
+                    <TextBox x:Name="ColorSuffixBox"
+                             VerticalContentAlignment="Center"
+                             ToolTip="可修改。启用颜色后缀时先拼接这里的颜色，再拼接通用后缀"
+                             LostFocus="SuffixBox_LostFocus"/>
+                </DockPanel>
                 <Border x:Name="OccupancyPanel"
                         Visibility="Collapsed"
                         Background="#FEF2F2"
@@ -288,17 +311,78 @@
                                        FontWeight="Bold"
                                        TextWrapping="Wrap"/>
                         </Expander.Header>
-                        <ScrollViewer MaxHeight="168" VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto">
                             <ItemsControl x:Name="OccupancyList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <TextBlock Margin="0,2,0,2" TextWrapping="Wrap">
-                                            <Run Text="{Binding Summary}" Foreground="#7F1D1D"/>
-                                            <Run Text="  "/>
-                                            <Hyperlink Click="OccupancyLink_Click"
-                                                       Tag="{Binding EditUrl}"
-                                                       Foreground="#1D4ED8">打开该产品</Hyperlink>
-                                        </TextBlock>
+                                        <Border BorderBrush="#FECACA" BorderThickness="0,0,0,1" Padding="0,6,0,6">
+                                            <StackPanel>
+                                                <WrapPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Sku}"
+                                                               FontWeight="Bold"
+                                                               Foreground="#7F1D1D"
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,10,4"
+                                                               ToolTip="{Binding BaseHint}"/>
+                                                    <TextBlock Text="建议SKU"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="#7F1D1D"
+                                                               Margin="0,0,6,4"/>
+                                                    <TextBox Text="{Binding SuggestedSku, UpdateSourceTrigger=PropertyChanged}"
+                                                             MinWidth="180"
+                                                             Width="240"
+                                                             Margin="0,0,8,4"
+                                                             Padding="6,3"
+                                                             VerticalContentAlignment="Center"
+                                                             ToolTip="可直接修改。这是去掉原后缀后，按顺序找到的第一个不再重复的 SKU"
+                                                             TextChanged="SuggestedSku_TextChanged"
+                                                             LostFocus="SuggestedSku_LostFocus"/>
+                                                    <TextBlock Text="{Binding SuggestStatus}"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="#9A3412"
+                                                               Margin="0,0,0,4"
+                                                               TextWrapping="Wrap"/>
+                                                </WrapPanel>
+                                                <WrapPanel VerticalAlignment="Center">
+                                                    <CheckBox Content="启用颜色后缀"
+                                                              Foreground="#7F1D1D"
+                                                              VerticalAlignment="Center"
+                                                              Margin="0,0,8,4"
+                                                              Checked="UseColorSuffix_Changed"
+                                                              Unchecked="UseColorSuffix_Changed"/>
+                                                    <ComboBox ItemsSource="{Binding ColorOptions}"
+                                                              SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
+                                                              MinWidth="120"
+                                                              Margin="0,0,0,4"
+                                                              ToolTip="选择后按「基础SKU + 颜色后缀 + 通用后缀」查找，例如 E0032-red-1"
+                                                              SelectionChanged="ColorSuffixCombo_SelectionChanged">
+                                                        <ComboBox.Style>
+                                                            <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding UseColorSuffix}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </ComboBox.Style>
+                                                    </ComboBox>
+                                                </WrapPanel>
+                                                <ItemsControl ItemsSource="{Binding Hits}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Margin="12,2,0,2" TextWrapping="Wrap">
+                                                                <Run Text="{Binding Summary}" Foreground="#7F1D1D"/>
+                                                                <Run Text="  "/>
+                                                                <Hyperlink Click="OccupancyLink_Click"
+                                                                           Tag="{Binding EditUrl}"
+                                                                           Foreground="#1D4ED8">打开该产品</Hyperlink>
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
@@ -309,13 +393,16 @@
                 </Expander>
             </StackPanel>
         </Border>
+        </StackPanel>
 
-        <Border Grid.Row="3"
+        <Border x:Name="GridHost"
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1"
                 CornerRadius="6">
             <DataGrid x:Name="PricingGrid"
+                      Height="220"
+                      MinHeight="220"
                       AutoGenerateColumns="False"
                       CanUserAddRows="False"
                       CanUserDeleteRows="False"
@@ -424,10 +511,11 @@
             </DataGrid>
         </Border>
 
-        <TextBlock Grid.Row="4"
+        <TextBlock x:Name="FooterHint"
                    Margin="4,8,4,0"
                    Foreground="{StaticResource MutedBrush}"
                    TextWrapping="Wrap"
                    Text="提示：黄色列为可编辑（搜索SKU、成本）· 页面SKU 与搜索SKU 一对一 · 售价同时写入详情页 MSRP 和价格 · 售价 = 成本/汇率/(1-佣金-毛利率)"/>
-    </Grid>
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>

@@ -10,10 +10,14 @@
  *           2026-09-28 分档参数默认折叠，产品详情与产品重复可折叠
  *           2026-09-28 产品重复提示改为写出占用店铺名称
  *           2026-09-28 SKU 占用改为检查全部店铺
+ *           2026-09-29 产品重复时按通用/颜色后缀生成可修改的新 SKU
+ *           2026-09-29 内容超出窗口时整页可滚动，定价表仍占用剩余高度
  */
 
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -41,7 +45,11 @@ public partial class JoomPricingView : UserControl
     private int _occupancyWindowSeq;
     private string? _openedEditUrl;
     private string? _openedProductId;
-    private readonly ObservableCollection<OccupancyLine> _occupancies = [];
+    private readonly ObservableCollection<OccupancySkuGroup> _occupancies = [];
+    private readonly SemaphoreSlim _suggestLock = new(1, 1);
+    private readonly Dictionary<string, int> _suggestTokens = new(StringComparer.OrdinalIgnoreCase);
+    private int _suggestGeneration;
+    private bool _suppressSuggestion;
 
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<string>? CountChanged;
@@ -94,7 +102,38 @@ public partial class JoomPricingView : UserControl
         _loaded = true;
         if (!string.IsNullOrWhiteSpace(_settings.ProductEditUrl))
             ProductUrlBox.Text = _settings.ProductEditUrl;
+        GeneralSuffixBox.Text = _settings.GeneralSkuSuffixes ?? JoomUserSettings.DefaultGeneralSkuSuffixes;
+        ColorSuffixBox.Text = _settings.ColorSkuSuffixes ?? JoomUserSettings.DefaultColorSkuSuffixes;
         SeedEmptyRows(12);
+        Dispatcher.BeginInvoke(UpdatePageLayout, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    private void JoomPricingView_SizeChanged(object sender, SizeChangedEventArgs e) => UpdatePageLayout();
+
+    private void TopPanel_SizeChanged(object sender, SizeChangedEventArgs e) => UpdatePageLayout();
+
+    /// <summary>
+    /// 上方内容增高时压低定价表，但至少留出一块可滚动的表格；仍放不下时整页出现滚动条。
+    /// </summary>
+    private void UpdatePageLayout()
+    {
+        if (!IsLoaded || PageScroll is null || TopPanel is null || FooterHint is null || GridHost is null)
+            return;
+
+        var viewport = PageScroll.ActualHeight;
+        if (viewport <= 1 || double.IsNaN(viewport))
+            return;
+
+        var footer = FooterHint.ActualHeight + FooterHint.Margin.Top + FooterHint.Margin.Bottom;
+        var gridChrome = GridHost.Margin.Top + GridHost.Margin.Bottom;
+        var gridHeight = viewport - TopPanel.ActualHeight - footer - gridChrome - 4;
+        if (gridHeight < 220)
+            gridHeight = 220;
+
+        if (!double.IsNaN(PricingGrid.Height) && Math.Abs(PricingGrid.Height - gridHeight) < 1)
+            return;
+
+        PricingGrid.Height = gridHeight;
     }
 
     /// <summary>
@@ -702,12 +741,24 @@ public partial class JoomPricingView : UserControl
 
         SetStatus($"正在检查 {skus.Count} 个 SKU 是否已被各店铺的 JOOM 产品占用…");
         var report = await _joomProduct.FindOccupanciesAsync(skus, _openedProductId, cookieHeader);
+        var groups = new Dictionary<string, OccupancySkuGroup>(StringComparer.OrdinalIgnoreCase);
         foreach (var hit in report.Hits)
         {
             var name = string.IsNullOrWhiteSpace(hit.ProductName) ? "未命名产品 " + hit.ProductId : hit.ProductName;
             var shop = string.IsNullOrWhiteSpace(hit.ShopName) ? "" : "「" + hit.ShopName + "」 · ";
             var parent = string.IsNullOrWhiteSpace(hit.ParentSku) ? "" : " · Parent SKU " + hit.ParentSku;
-            _occupancies.Add(new OccupancyLine
+            if (!groups.TryGetValue(hit.Sku, out var group))
+            {
+                group = new OccupancySkuGroup
+                {
+                    Sku = hit.Sku,
+                    BaseSku = JoomSkuSuffix.StripBase(hit.Sku)
+                };
+                groups[hit.Sku] = group;
+                _occupancies.Add(group);
+            }
+
+            group.Hits.Add(new OccupancyHitLine
             {
                 Summary = hit.Sku + " · " + shop + hit.Location + " · 「" + name + "」" + parent,
                 EditUrl = hit.EditUrl
@@ -716,10 +767,6 @@ public partial class JoomPricingView : UserControl
 
         if (_occupancies.Count > 0)
         {
-            var skuCount = report.Hits
-                .Select(h => h.Sku)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count();
             var shopNames = report.Hits
                 .Select(h => h.ShopName)
                 .Where(n => n.Length > 0)
@@ -728,9 +775,24 @@ public partial class JoomPricingView : UserControl
             var occupiedBy = shopNames.Count == 0
                 ? "当前店铺"
                 : string.Join("、", shopNames.Select(n => "「" + n + "」"));
-            OccupancyTitle.Text = skuCount + " 个 SKU 已被" + occupiedBy + "店铺占用，直接发布会提示「产品重复」";
+            OccupancyTitle.Text = _occupancies.Count + " 个 SKU 已被" + occupiedBy + "店铺占用，直接发布会提示「产品重复」";
             OccupancyExpander.IsExpanded = true;
             OccupancyPanel.Visibility = Visibility.Visible;
+            try
+            {
+                await FillSuggestedSkusAsync(_occupancies.ToList());
+            }
+            catch (Exception ex)
+            {
+                foreach (var group in _occupancies)
+                {
+                    if (string.IsNullOrWhiteSpace(group.SuggestedSku))
+                        group.SuggestStatus = "查找可用后缀失败：" + ex.Message;
+                }
+
+                if (IsCookieInvalidError(ex.Message))
+                    throw;
+            }
         }
 
         var failed = report.FailedLocations.Count == 0
@@ -739,11 +801,17 @@ public partial class JoomPricingView : UserControl
         if (_occupancies.Count == 0)
             return "已检查 " + skus.Count + " 个 SKU，各店铺的采集箱、待发布、在线产品中没有其他占用。" + failed;
 
-        return "发现 " + _occupancies.Count + " 处 SKU 占用，发布前请先更换 SKU，或处理下面列出的产品。" + failed;
+        var suggested = _occupancies.Count(g => !string.IsNullOrWhiteSpace(g.SuggestedSku));
+        var suggestionNote = suggested == _occupancies.Count
+            ? " 已在每个重复 SKU 后面填入未占用的新 SKU，可以直接修改。"
+            : " 已填入 " + suggested + " 个未占用的新 SKU。未填入的可以启用颜色后缀、补充通用后缀，或手动填写。";
+        return "发现 " + report.Hits.Count + " 处 SKU 占用，发布前请先更换 SKU，或处理下面列出的产品。" + suggestionNote + failed;
     }
 
     private void ClearOccupancy()
     {
+        _suggestGeneration++;
+        _suggestTokens.Clear();
         _occupancies.Clear();
         OccupancyTitle.Text = "";
         OccupancyPanel.Visibility = Visibility.Collapsed;
@@ -798,10 +866,446 @@ public partial class JoomPricingView : UserControl
         }
     }
 
-    private sealed class OccupancyLine
+    private async void SuffixBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!PersistSuffixes())
+            return;
+        if (_suppressSuggestion || OccupancyPanel.Visibility != Visibility.Visible || _occupancies.Count == 0)
+            return;
+
+        foreach (var group in _occupancies)
+        {
+            group.SuggestionUserEdited = false;
+            if (group.UseColorSuffix)
+                ReloadColorOptions(group);
+        }
+
+        await RunSuggestionAsync(_occupancies.ToList());
+    }
+
+    private async void UseColorSuffix_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSuggestion)
+            return;
+        if (sender is not CheckBox box || box.DataContext is not OccupancySkuGroup group)
+            return;
+
+        group.UseColorSuffix = box.IsChecked == true;
+        group.SuggestionUserEdited = false;
+        if (group.UseColorSuffix)
+            ReloadColorOptions(group);
+        await RunSuggestionAsync([group]);
+    }
+
+    private async void ColorSuffixCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSuggestion)
+            return;
+        if (sender is not ComboBox combo || combo.DataContext is not OccupancySkuGroup group || !group.UseColorSuffix)
+            return;
+
+        group.SelectedColor = combo.SelectedItem as string;
+        group.SuggestionUserEdited = false;
+        await RunSuggestionAsync([group]);
+    }
+
+    private void SuggestedSku_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppressSuggestion)
+            return;
+        if (sender is FrameworkElement element && element.DataContext is OccupancySkuGroup group)
+            group.SuggestionUserEdited = true;
+    }
+
+    private async void SuggestedSku_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSuggestion)
+            return;
+        if (sender is not TextBox box || box.DataContext is not OccupancySkuGroup group || !group.SuggestionUserEdited)
+            return;
+
+        var sku = NormalizeSku(box.Text);
+        var token = _suggestTokens.GetValueOrDefault(group.Sku);
+        var generation = _suggestGeneration;
+        group.SuggestedSku = sku;
+        if (sku.Length == 0)
+        {
+            group.SuggestStatus = "请填写建议 SKU";
+            return;
+        }
+
+        var conflict = LocalConflict(group, sku);
+        if (conflict is not null)
+        {
+            group.SuggestStatus = conflict;
+            return;
+        }
+
+        try
+        {
+            group.SuggestStatus = "正在确认修改后的 SKU 是否重复…";
+            var report = await QueryOccupancyAsync([sku], generation);
+            if (generation != _suggestGeneration || token != _suggestTokens.GetValueOrDefault(group.Sku))
+                return;
+            if (!NormalizeSku(group.SuggestedSku).Equals(sku, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var occupied = report.Hits.Any(hit => hit.Sku.Equals(sku, StringComparison.OrdinalIgnoreCase));
+            group.SuggestStatus = occupied
+                ? "修改后的 SKU 仍会产品重复"
+                : report.FailedLocations.Count == 0
+                    ? "修改后的 SKU 未被占用"
+                    : "修改后的 SKU 在已核对范围未被占用";
+        }
+        catch (Exception ex)
+        {
+            group.SuggestStatus = "确认失败：" + ex.Message;
+            SetStatus("确认建议 SKU 失败：" + ex.Message);
+            if (IsCookieInvalidError(ex.Message))
+                CookieInvalidated?.Invoke(this, ex.Message);
+        }
+    }
+
+    private void ReloadColorOptions(OccupancySkuGroup group)
+    {
+        var colors = JoomSkuSuffix.Parse(ColorSuffixBox.Text);
+        var keep = group.SelectedColor;
+        _suppressSuggestion = true;
+        try
+        {
+            group.ColorOptions.Clear();
+            foreach (var color in colors)
+                group.ColorOptions.Add(color);
+            group.SelectedColor = keep is not null && colors.Contains(keep, StringComparer.OrdinalIgnoreCase) ? keep : null;
+        }
+        finally
+        {
+            _suppressSuggestion = false;
+        }
+    }
+
+    private async Task RunSuggestionAsync(IReadOnlyList<OccupancySkuGroup> groups)
+    {
+        try
+        {
+            await FillSuggestedSkusAsync(groups);
+        }
+        catch (Exception ex)
+        {
+            foreach (var group in groups)
+            {
+                if (string.IsNullOrWhiteSpace(group.SuggestedSku))
+                    group.SuggestStatus = "查找可用后缀失败：" + ex.Message;
+            }
+
+            SetStatus("查找可用后缀失败：" + ex.Message);
+            if (IsCookieInvalidError(ex.Message))
+                CookieInvalidated?.Invoke(this, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 去掉原 SKU 的「-」后缀后，按通用后缀从左到右拼接。启用颜色时先接所选颜色。
+    /// 同一轮候选一起查询，跳过仍被占用或与当前产品其他 SKU 冲突的结果。
+    /// </summary>
+    private async Task FillSuggestedSkusAsync(IReadOnlyList<OccupancySkuGroup> targets)
+    {
+        if (targets.Count == 0)
+            return;
+
+        var tokens = new Dictionary<OccupancySkuGroup, int>();
+        foreach (var group in targets)
+        {
+            var next = _suggestTokens.GetValueOrDefault(group.Sku) + 1;
+            _suggestTokens[group.Sku] = next;
+            tokens[group] = next;
+        }
+
+        var generation = _suggestGeneration;
+        await _suggestLock.WaitAsync();
+        try
+        {
+            if (generation != _suggestGeneration)
+                return;
+
+            var general = JoomSkuSuffix.Parse(GeneralSuffixBox.Text);
+            var pending = new List<OccupancySkuGroup>();
+            foreach (var group in targets)
+            {
+                if (!IsSuggestionCurrent(group, tokens, generation) || group.SuggestionUserEdited)
+                    continue;
+                if (group.UseColorSuffix && string.IsNullOrWhiteSpace(group.SelectedColor))
+                {
+                    SetSuggestion(group, "", "请选择颜色后缀");
+                    continue;
+                }
+
+                if (general.Count == 0)
+                {
+                    SetSuggestion(group, "", "请先填写 SKU 的通用后缀");
+                    continue;
+                }
+
+                SetSuggestion(group, "", "正在查找未重复的后缀…");
+                pending.Add(group);
+            }
+
+            var reserved = CollectReservedSkus(pending);
+            for (var i = 0; i < general.Count && pending.Count > 0; i++)
+            {
+                pending = pending.Where(group => IsSuggestionCurrent(group, tokens, generation)).ToList();
+                if (pending.Count == 0 || generation != _suggestGeneration)
+                    return;
+
+                var batch = new List<(OccupancySkuGroup Group, string Candidate)>();
+                var waiting = new List<OccupancySkuGroup>();
+                foreach (var group in pending)
+                {
+                    if (group.SuggestionUserEdited)
+                    {
+                        if (group.SuggestStatus.StartsWith("正在查找", StringComparison.Ordinal))
+                            group.SuggestStatus = "已手动修改";
+                        continue;
+                    }
+
+                    var color = group.UseColorSuffix ? group.SelectedColor : null;
+                    var candidate = JoomSkuSuffix.Combine(group.BaseSku, color, general[i]);
+                    if (candidate.Length == 0 || candidate.Contains(',') || !reserved.Add(candidate))
+                    {
+                        waiting.Add(group);
+                        continue;
+                    }
+
+                    batch.Add((group, candidate));
+                }
+
+                var occupied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (batch.Count > 0)
+                {
+                    SetStatus("正在检查 " + batch.Count + " 个候选 SKU 是否仍会产品重复…");
+                    var cookieHeader = GetCookieHeader();
+                    if (string.IsNullOrWhiteSpace(cookieHeader))
+                        throw new InvalidOperationException("请先导出 Cookie。");
+
+                    var report = await _joomProduct.FindOccupanciesAsync(
+                        batch.Select(item => item.Candidate).ToList(),
+                        _openedProductId,
+                        cookieHeader);
+                    if (generation != _suggestGeneration)
+                        return;
+
+                    foreach (var hit in report.Hits)
+                        occupied.Add(hit.Sku);
+                }
+
+                var still = new List<OccupancySkuGroup>(waiting);
+                foreach (var (group, candidate) in batch)
+                {
+                    if (!IsSuggestionCurrent(group, tokens, generation))
+                    {
+                        reserved.Remove(candidate);
+                        continue;
+                    }
+
+                    if (group.SuggestionUserEdited)
+                    {
+                        if (!NormalizeSku(group.SuggestedSku).Equals(candidate, StringComparison.OrdinalIgnoreCase))
+                            reserved.Remove(candidate);
+                        continue;
+                    }
+
+                    if (occupied.Contains(candidate))
+                    {
+                        reserved.Remove(candidate);
+                        still.Add(group);
+                        continue;
+                    }
+
+                    SetSuggestion(group, candidate, "该后缀未被占用");
+                }
+
+                pending = still;
+            }
+
+            foreach (var group in pending)
+            {
+                if (!IsSuggestionCurrent(group, tokens, generation) || group.SuggestionUserEdited)
+                    continue;
+                SetSuggestion(group, "", "这些后缀都会产品重复，请改后缀或手动填写");
+            }
+        }
+        finally
+        {
+            _suggestLock.Release();
+        }
+    }
+
+    private async Task<JoomSkuOccupancyReport> QueryOccupancyAsync(IReadOnlyList<string> skus, int generation)
+    {
+        await _suggestLock.WaitAsync();
+        try
+        {
+            if (generation != _suggestGeneration)
+                return new JoomSkuOccupancyReport();
+
+            var cookieHeader = GetCookieHeader();
+            if (string.IsNullOrWhiteSpace(cookieHeader))
+                throw new InvalidOperationException("请先导出 Cookie。");
+
+            return await _joomProduct.FindOccupanciesAsync(skus, _openedProductId, cookieHeader);
+        }
+        finally
+        {
+            _suggestLock.Release();
+        }
+    }
+
+    private bool IsSuggestionCurrent(OccupancySkuGroup group, IReadOnlyDictionary<OccupancySkuGroup, int> tokens, int generation)
+    {
+        return generation == _suggestGeneration
+               && tokens.TryGetValue(group, out var token)
+               && token == _suggestTokens.GetValueOrDefault(group.Sku);
+    }
+
+    private HashSet<string> CollectReservedSkus(IReadOnlyCollection<OccupancySkuGroup> pending)
+    {
+        var pendingSkus = pending.Select(group => group.Sku).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in _rows)
+        {
+            var page = NormalizeSku(row.PageSku);
+            var search = NormalizeSku(row.Sku);
+            if (page.Length > 0)
+                reserved.Add(page);
+            if (search.Length > 0)
+                reserved.Add(search);
+        }
+
+        foreach (var group in _occupancies)
+        {
+            if (pendingSkus.Contains(group.Sku))
+                continue;
+            var suggested = NormalizeSku(group.SuggestedSku);
+            if (suggested.Length > 0)
+                reserved.Add(suggested);
+        }
+
+        return reserved;
+    }
+
+    private string? LocalConflict(OccupancySkuGroup group, string sku)
+    {
+        foreach (var row in _rows)
+        {
+            var page = NormalizeSku(string.IsNullOrWhiteSpace(row.PageSku) ? row.Sku : row.PageSku);
+            if (page.Length > 0 && page.Equals(sku, StringComparison.OrdinalIgnoreCase))
+                return "与当前产品里的 SKU 相同";
+        }
+
+        foreach (var other in _occupancies)
+        {
+            if (ReferenceEquals(other, group))
+                continue;
+            var suggested = NormalizeSku(other.SuggestedSku);
+            if (suggested.Length > 0 && suggested.Equals(sku, StringComparison.OrdinalIgnoreCase))
+                return "与另一条建议 SKU 相同";
+        }
+
+        return null;
+    }
+
+    private void SetSuggestion(OccupancySkuGroup group, string sku, string status)
+    {
+        _suppressSuggestion = true;
+        try
+        {
+            group.SuggestedSku = sku;
+            group.SuggestStatus = status;
+        }
+        finally
+        {
+            _suppressSuggestion = false;
+        }
+    }
+
+    private bool PersistSuffixes()
+    {
+        var general = GeneralSuffixBox.Text ?? "";
+        var color = ColorSuffixBox.Text ?? "";
+        if (general == _settings.GeneralSkuSuffixes && color == _settings.ColorSkuSuffixes)
+            return false;
+
+        _settings.GeneralSkuSuffixes = general;
+        _settings.ColorSkuSuffixes = color;
+        try
+        {
+            _settings.Save();
+        }
+        catch
+        {
+            // 本地保存失败不阻断操作
+        }
+
+        return true;
+    }
+
+    private sealed class OccupancyHitLine
     {
         public string Summary { get; init; } = "";
         public string EditUrl { get; init; } = "";
+    }
+
+    private sealed class OccupancySkuGroup : INotifyPropertyChanged
+    {
+        private bool _useColorSuffix;
+        private string? _selectedColor;
+        private string _suggestedSku = "";
+        private string _suggestStatus = "";
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public string Sku { get; init; } = "";
+        public string BaseSku { get; init; } = "";
+        public ObservableCollection<string> ColorOptions { get; } = [];
+        public ObservableCollection<OccupancyHitLine> Hits { get; } = [];
+        public bool SuggestionUserEdited { get; set; }
+
+        public string BaseHint =>
+            string.Equals(BaseSku, Sku, StringComparison.Ordinal)
+                ? "该 SKU 没有「-」后缀，将直接在末尾拼接。"
+                : "将去掉「-」及其后面的内容，按 " + BaseSku + " 再拼接后缀。";
+
+        public bool UseColorSuffix
+        {
+            get => _useColorSuffix;
+            set => Set(ref _useColorSuffix, value);
+        }
+
+        public string? SelectedColor
+        {
+            get => _selectedColor;
+            set => Set(ref _selectedColor, value);
+        }
+
+        public string SuggestedSku
+        {
+            get => _suggestedSku;
+            set => Set(ref _suggestedSku, value);
+        }
+
+        public string SuggestStatus
+        {
+            get => _suggestStatus;
+            set => Set(ref _suggestStatus, value);
+        }
+
+        private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
+        {
+            if (Equals(field, value))
+                return;
+            field = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
     }
 
     private async void CopySkuPrice_Click(object sender, RoutedEventArgs e)
