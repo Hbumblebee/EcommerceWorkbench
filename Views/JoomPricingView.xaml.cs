@@ -195,7 +195,7 @@ public partial class JoomPricingView : UserControl
                 {
                     var row = new JoomRow
                     {
-                        Sku = hit.Sku.Trim(),
+                        Sku = SkuText.Normalize(hit.Sku),
                         Cost = cost
                     };
                     _rows.Add(row);
@@ -1595,7 +1595,7 @@ public partial class JoomPricingView : UserControl
 
     private void SetStatus(string text) => StatusChanged?.Invoke(this, text);
 
-    private static string NormalizeSku(string? sku) => (sku ?? "").Trim();
+    private static string NormalizeSku(string? sku) => SkuText.Normalize(sku);
 
     private static string FormatMoney(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
 
@@ -1607,21 +1607,14 @@ public partial class JoomPricingView : UserControl
         var raw = box.Text?.Trim();
         if (string.IsNullOrEmpty(raw))
             return fallback;
-        return TryParseDouble(raw, out var v) ? v : fallback;
+        return NumberParser.TryParseDouble(raw, out var v) ? v : fallback;
     }
 
     private static double ReadPercent(TextBox box, double fallbackPercent)
     {
         var raw = box.Text?.Trim().TrimEnd('%').Trim();
-        if (string.IsNullOrEmpty(raw) || !TryParseDouble(raw, out var v))
+        if (string.IsNullOrEmpty(raw) || !NumberParser.TryParsePercent(raw, out var rate))
             return fallbackPercent / 100.0;
-        return v / 100.0;
-    }
-
-    private static bool TryParseDouble(string text, out double value)
-    {
-        text = text.Trim().Replace(",", "");
-        return double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value)
-               || double.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
+        return rate;
     }
 }

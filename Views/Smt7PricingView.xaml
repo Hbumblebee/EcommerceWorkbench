@@ -142,7 +142,8 @@
                                 <TextBlock Grid.Row="0" Grid.Column="1" Text="分子1" Style="{StaticResource ParamHeader}"/>
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="常量" Style="{StaticResource ParamHeader}"/>
                                 <TextBlock Grid.Row="0" Grid.Column="3" Text="分子2" Style="{StaticResource ParamHeader}"/>
-                                <TextBlock Grid.Row="0" Grid.Column="4" Text="毛利%" Style="{StaticResource ParamHeader}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="4" Text="毛利% (仅参考)" Style="{StaticResource ParamHeader}"
+                                           ToolTip="此列只作展示，不参与全托2.0 公式。售价只由分子1/常量/分子2 与重量加价决定。"/>
 
                                 <TextBox x:Name="CostMaxBox1" Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamBox}" Text="2" LostFocus="Param_LostFocus"/>
                                 <TextBox x:Name="CostFactor1Box1" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>

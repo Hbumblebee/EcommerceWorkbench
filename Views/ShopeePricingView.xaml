@@ -4,6 +4,7 @@
              xmlns:conv="clr-namespace:EcommerceWorkbench.Converters">
     <UserControl.Resources>
         <conv:NullableDoubleConverter x:Key="NullableDouble"/>
+        <conv:NumberTextValidationRule x:Key="NumberRule"/>
         <Style x:Key="InputCell" TargetType="TextBlock">
             <Setter Property="Background" Value="{StaticResource InputBgBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
@@ -228,25 +229,55 @@
                     </Style>
                 </DataGrid.ColumnHeaderStyle>
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="#" Binding="{Binding Index}" IsReadOnly="True" Width="44"/>
+                    <DataGridTextColumn Header="#"
+                                        Binding="{Binding Index, Mode=OneWay}"
+                                        IsReadOnly="True"
+                                        Width="44"/>
                     <DataGridTextColumn Header="SKU" Binding="{Binding Sku, UpdateSourceTrigger=LostFocus}" Width="160"
                                         ElementStyle="{StaticResource InputCell}"
                                         EditingElementStyle="{StaticResource InputEdit}"/>
                     <DataGridTextColumn Header="商品成本价 CNY"
-                                        Binding="{Binding Cost, Converter={StaticResource NullableDouble}, UpdateSourceTrigger=LostFocus}"
                                         Width="120"
                                         ElementStyle="{StaticResource InputCell}"
-                                        EditingElementStyle="{StaticResource InputEdit}"/>
+                                        EditingElementStyle="{StaticResource InputEdit}">
+                        <DataGridTextColumn.Binding>
+                            <Binding Path="Cost"
+                                     Converter="{StaticResource NullableDouble}"
+                                     UpdateSourceTrigger="LostFocus">
+                                <Binding.ValidationRules>
+                                    <conv:NumberTextValidationRule/>
+                                </Binding.ValidationRules>
+                            </Binding>
+                        </DataGridTextColumn.Binding>
+                    </DataGridTextColumn>
                     <DataGridTextColumn Header="包裹重量 g"
-                                        Binding="{Binding Weight, Converter={StaticResource NullableDouble}, UpdateSourceTrigger=LostFocus}"
                                         Width="110"
                                         ElementStyle="{StaticResource InputCell}"
-                                        EditingElementStyle="{StaticResource InputEdit}"/>
+                                        EditingElementStyle="{StaticResource InputEdit}">
+                        <DataGridTextColumn.Binding>
+                            <Binding Path="Weight"
+                                     Converter="{StaticResource NullableDouble}"
+                                     UpdateSourceTrigger="LostFocus">
+                                <Binding.ValidationRules>
+                                    <conv:NumberTextValidationRule/>
+                                </Binding.ValidationRules>
+                            </Binding>
+                        </DataGridTextColumn.Binding>
+                    </DataGridTextColumn>
                     <DataGridTextColumn Header="预期净利润 CNY"
-                                        Binding="{Binding ExpectedProfit, Converter={StaticResource NullableDouble}, UpdateSourceTrigger=LostFocus}"
                                         Width="130"
                                         ElementStyle="{StaticResource InputCell}"
-                                        EditingElementStyle="{StaticResource InputEdit}"/>
+                                        EditingElementStyle="{StaticResource InputEdit}">
+                        <DataGridTextColumn.Binding>
+                            <Binding Path="ExpectedProfit"
+                                     Converter="{StaticResource NullableDouble}"
+                                     UpdateSourceTrigger="LostFocus">
+                                <Binding.ValidationRules>
+                                    <conv:NumberTextValidationRule/>
+                                </Binding.ValidationRules>
+                            </Binding>
+                        </DataGridTextColumn.Binding>
+                    </DataGridTextColumn>
                     <DataGridTextColumn Header="折前售价" Binding="{Binding PriceBeforeDiscount}" IsReadOnly="True" Width="100"
                                         ElementStyle="{StaticResource KeyResultCell}"/>
                     <DataGridTextColumn Header="商品售价（折后售价）" Binding="{Binding DiscountedPrice}" IsReadOnly="True" MinWidth="160"

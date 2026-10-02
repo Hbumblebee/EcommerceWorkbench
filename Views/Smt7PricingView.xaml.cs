@@ -124,7 +124,7 @@ public partial class Smt7PricingView : UserControl
                 {
                     var row = new Smt7Row
                     {
-                        Sku = hit.Sku.Trim(),
+                        Sku = SkuText.Normalize(hit.Sku),
                         Cost = cost
                     };
                     _rows.Add(row);
@@ -196,7 +196,12 @@ public partial class Smt7PricingView : UserControl
         }
 
         UpdateCount();
-        SetStatus($"速卖通7 计算完成：成功 {okCount} · 跳过 {skipCount} · 失败 {errCount}");
+        // 重量缺失时公式按 0kg 加价，最终价会偏低。原实现只显示「成功 N」，容易整批误用。
+        var missingWeight = _rows.Count(r => r.Status == "OK" && r.Weight is null);
+        var weightNote = missingWeight == 0
+            ? ""
+            : $" · 注意 {missingWeight} 行缺重量（已按 0kg 未加价）";
+        SetStatus($"速卖通7 计算完成：成功 {okCount} · 跳过 {skipCount} · 失败 {errCount}{weightNote}");
     }
 
     public void RefreshCount() => UpdateCount();
@@ -393,7 +398,10 @@ public partial class Smt7PricingView : UserControl
         catch (Exception ex)
         {
             SetStatus($"回写失败：{ex.Message}");
-            MessageBox.Show(ex.Message, "回写失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (IsCookieInvalidError(ex.Message))
+                CookieInvalidated?.Invoke(this, ex.Message);
+            else
+                MessageBox.Show(ex.Message, "回写失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
         {
@@ -706,7 +714,7 @@ public partial class Smt7PricingView : UserControl
                 return;
             }
 
-            if (!TryParseDouble(raw!, out var kg))
+            if (!NumberParser.TryParseDouble(raw!, out var kg))
                 return;
 
             row.Weight = Math.Round(kg * 1000.0, 4, MidpointRounding.AwayFromZero);
@@ -724,7 +732,7 @@ public partial class Smt7PricingView : UserControl
             return;
         }
 
-        if (!TryParseDouble(raw!, out var grams))
+        if (!NumberParser.TryParseDouble(raw!, out var grams))
             return;
 
         row.Weight = grams;
@@ -785,7 +793,7 @@ public partial class Smt7PricingView : UserControl
 
     private void SetStatus(string text) => StatusChanged?.Invoke(this, text);
 
-    private static string NormalizeSku(string? sku) => (sku ?? "").Trim();
+    private static string NormalizeSku(string? sku) => SkuText.Normalize(sku);
 
     private static string FormatMoney(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
 
@@ -885,14 +893,7 @@ public partial class Smt7PricingView : UserControl
         var raw = box.Text?.Trim().TrimEnd('%').Trim();
         if (string.IsNullOrEmpty(raw))
             return fallback;
-        return TryParseDouble(raw, out var v) ? v : fallback;
-    }
-
-    private static bool TryParseDouble(string text, out double value)
-    {
-        text = text.Trim().Replace(",", "");
-        return double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value)
-               || double.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
+        return NumberParser.TryParseDouble(raw, out var v) ? v : fallback;
     }
 
     private static string FormatParam(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);

@@ -18,6 +18,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using EcommerceWorkbench.Models;
+using EcommerceWorkbench.Services;
 using EcommerceWorkbench.Services.Shopee;
 using Microsoft.Win32;
 
@@ -44,6 +45,9 @@ public partial class ShopeePricingView : UserControl
         PricingGrid.ItemsSource = _rows;
         Loaded += ShopeePricingView_Loaded;
     }
+
+    /// <summary>释放页面持有的 HTTP 客户端（由 MainWindow.Closed 调用）。</summary>
+    public void Cleanup() => _rateService.Dispose();
 
     private async void ShopeePricingView_Loaded(object sender, RoutedEventArgs e)
     {
@@ -72,6 +76,7 @@ public partial class ShopeePricingView : UserControl
         CommitGrid();
         _suppressAutoCalc = true;
         var imported = 0;
+        var applied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             for (var i = _rows.Count - 1; i >= 0; i--)
@@ -88,11 +93,16 @@ public partial class ShopeePricingView : UserControl
                     bySku.TryAdd(key, row);
             }
 
+            // 店小秘 pageList 会把同一 SKU 的多个变体全部返回，直接导入会追加成重复行，
+            // 随后重复 SKU 检查会把它们标成「SKU 重复」并拒绝计算。定价表以 SKU 为唯一键，
+            // 因此按 SKU 合并后再导入（同 SKU 只覆盖同一行，不新增副本）。
             foreach (var hit in hits)
             {
                 var sku = NormalizeSku(hit.Sku);
                 if (sku.Length == 0)
                     continue;
+
+                applied.Add(sku);
 
                 var cost = hit.Price.HasValue
                     ? (double)Math.Round(hit.Price.Value, 2, MidpointRounding.AwayFromZero)
@@ -111,7 +121,7 @@ public partial class ShopeePricingView : UserControl
                 {
                     var row = new ProductRow
                     {
-                        Sku = hit.Sku.Trim(),
+                        Sku = SkuText.Normalize(hit.Sku),
                         Cost = cost,
                         Weight = weight
                     };
@@ -127,17 +137,19 @@ public partial class ShopeePricingView : UserControl
         {
             _suppressAutoCalc = false;
             UpdateCount();
-            if (ReadDefaultProfitRate() is not null)
+
+            // 尊重「参数变更后自动计算」开关：关闭时只导入，由用户按 F5 或「批量计算」触发。
+            if (AutoCalcCheck.IsChecked != true)
+            {
+                SetStatus($"已导入 {applied.Count} 个 SKU（{imported} 条命中，按 SKU 合并）到定价。已关闭自动计算，请按 F5 计算。");
+            }
+            else if (ReadDefaultProfitRate() is not null)
             {
                 ApplyDefaultProfitRateToRows();
             }
-            else if (AutoCalcCheck.IsChecked == true)
-            {
-                RecalculateAll();
-            }
             else
             {
-                SetStatus($"已导入 {imported} 条到定价（按 SKU 覆盖成本/重量）。请填写默认预期净利润率后自动计算。");
+                RecalculateAll();
             }
         }
 
@@ -541,7 +553,13 @@ public partial class ShopeePricingView : UserControl
             case "预期净利润 CNY":
                 row.ExpectedProfit = null;
                 break;
+            default:
+                return;
         }
+
+        // 原实现清空后不重算，结果列会一直显示上一次的旧值，并可能被导出。
+        if (AutoCalcCheck.IsChecked == true)
+            Dispatcher.BeginInvoke(RecalculateAll, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     private void PasteFromClipboard()
@@ -574,6 +592,11 @@ public partial class ShopeePricingView : UserControl
         var isTsv = lines.Any(l => l.Contains('\t'));
         var pastedCells = 0;
 
+        // 粘贴源的第 cellOffset 个单元格对应到第一个可写列。
+        // 原实现用 colIndex = startCol + j 取单元格，遇到中间只读列就 continue，
+        // 被跳过的列没有消耗对应的粘贴内容，导致后续所有列整体左移一格。
+        var cellOffset = 0;
+
         _suppressAutoCalc = true;
         try
         {
@@ -586,17 +609,23 @@ public partial class ShopeePricingView : UserControl
                     ? lines[i].Split('\t')
                     : SplitNonTsvLine(lines[i]);
 
-                for (var j = 0; j < cells.Length; j++)
+                cellOffset = 0;
+                for (var colIndex = startCol; colIndex < PricingGrid.Columns.Count; colIndex++)
                 {
-                    var colIndex = startCol + j;
-                    if (colIndex < 0 || colIndex >= PricingGrid.Columns.Count)
+                    if (cellOffset >= cells.Length)
                         break;
 
                     var col = PricingGrid.Columns[colIndex];
                     if (col.IsReadOnly)
+                    {
+                        // 只读列不落值，但消耗掉对应的粘贴单元格，保证列对齐。
+                        cellOffset++;
                         continue;
+                    }
 
-                    var raw = cells[j].Trim().Trim('"');
+                    var raw = cells[cellOffset].Trim().Trim('"');
+                    cellOffset++;
+
                     var row = _rows[startRow + i];
                     var header = col.Header?.ToString();
 
@@ -867,7 +896,7 @@ public partial class ShopeePricingView : UserControl
         }
     }
 
-    private static string NormalizeSku(string? sku) => (sku ?? "").Trim();
+    private static string NormalizeSku(string? sku) => SkuText.Normalize(sku);
 
     private static string FormatMoney(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
 
@@ -880,9 +909,5 @@ public partial class ShopeePricingView : UserControl
     }
 
     private static bool TryParseDouble(string text, out double value)
-    {
-        text = text.Trim().Replace(",", "");
-        return double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value)
-               || double.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out value);
-    }
+        => NumberParser.TryParseDouble(text, out value);
 }
