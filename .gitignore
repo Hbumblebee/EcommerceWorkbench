@@ -1,6 +1,18 @@
-bin/
-obj/
-publish/
+# 构建产物（不入库）
+# 注意：publish/ 里的 exe 曾被 git add -f 强制入库，忽略规则对已跟踪文件无效。
+# 重新发布后如发现 publish/ 仍被跟踪，用：git rm -r --cached publish
+/bin/
+/obj/
+/publish/
+
+# 发布目录里除单文件 exe 外的 WebView2 附带文件
+/publish/*.xml
+/publish/*.pdb
+
+# IDE / 用户配置
 *.user
 *.suo
 .vs/
+
+# 发版打包时的单文件自解压临时目录
+EcommerceWorkbench.exe.WebView2/
