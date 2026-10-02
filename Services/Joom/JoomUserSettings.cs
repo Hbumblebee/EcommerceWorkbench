@@ -15,9 +15,11 @@ public sealed class JoomUserSettings
         WriteIndented = true
     };
 
-    public const string DefaultGeneralSkuSuffixes = "-1，-01，-001，-0001，-00001，AS，AS01，-AS001，-AS001，-AS0001，-AS00001";
+    /// <summary>产品重复时按顺序拼接的通用后缀；原默认值里 <c>-AS001</c> 重复了两次，已去重。</summary>
+    public const string DefaultGeneralSkuSuffixes = "-1，-01，-001，-0001，-00001，AS，AS01，-AS001，-AS0001，-AS00001";
 
-    public const string DefaultColorSkuSuffixes = "-grey，-red，-green，-yellow，-black，-blue，-white，-black";
+    /// <summary>启用颜色后缀时可选的颜色；原默认值里 <c>-black</c> 重复了两次，已去重。</summary>
+    public const string DefaultColorSkuSuffixes = "-grey，-red，-green，-yellow，-black，-blue，-white";
 
     public string ProductEditUrl { get; set; } = "";
 
@@ -50,6 +52,6 @@ public sealed class JoomUserSettings
     {
         var path = GetFilePath();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
     }
 }

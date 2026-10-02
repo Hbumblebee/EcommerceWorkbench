@@ -43,7 +43,7 @@ public sealed class Smt7UserSettings
     {
         var path = GetFilePath();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
     }
 
     public Smt7Settings ToCalcSettings()

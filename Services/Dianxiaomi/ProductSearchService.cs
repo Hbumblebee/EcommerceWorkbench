@@ -186,15 +186,7 @@ public sealed class ProductSearchService
         return (orderedHits, missed);
     }
 
-    private static string NormalizeSku(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return string.Empty;
-        }
-
-        return value.Trim().Normalize(NormalizationForm.FormKC);
-    }
+    private static string NormalizeSku(string? value) => SkuText.Normalize(value);
 
     /// <summary>
     /// 拼接 pageList 表单参数；searchValue 多个用英文逗号拼接。

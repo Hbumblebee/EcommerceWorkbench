@@ -27,16 +27,16 @@ public sealed class CookieStore
     public static string DefaultFilePath => Path.Combine(AppPaths.DataDirectory, "cookies.json");
 
     /// <summary>
-    /// 将导出对象写入文件。
+    /// 将导出对象写入文件（先写临时文件再替换，避免中断留下半截 JSON）。
     /// </summary>
     public void Save(CookieExportFile file, string path)
     {
         var json = JsonSerializer.Serialize(file, JsonOptions);
-        File.WriteAllText(path, json);
+        AtomicFile.WriteAllText(path, json);
     }
 
     /// <summary>
-    /// 从文件加载 Cookie 导出对象；文件不存在时返回 null。
+    /// 从文件加载 Cookie 导出对象；文件不存在或内容损坏时返回 null。
     /// </summary>
     public CookieExportFile? Load(string path)
     {
@@ -45,8 +45,16 @@ public sealed class CookieStore
             return null;
         }
 
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<CookieExportFile>(json, JsonOptions);
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<CookieExportFile>(json, JsonOptions);
+        }
+        catch
+        {
+            // 文件损坏不应让调用方（含启动流程）崩溃，按「未登录」处理。
+            return null;
+        }
     }
 
     /// <summary>

@@ -57,6 +57,7 @@ public partial class MainWindow : Window
         Closed += (_, _) =>
         {
             SearchView.Cleanup();
+            PricingView.Cleanup();
             JoomView.Cleanup();
             Smt7View.Cleanup();
         };

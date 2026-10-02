@@ -61,7 +61,7 @@ public sealed class WindowBoundsStore
                 Height = height,
                 State = state
             };
-            File.WriteAllText(GetFilePath(), JsonSerializer.Serialize(data, JsonOptions));
+            AtomicFile.WriteAllText(GetFilePath(), JsonSerializer.Serialize(data, JsonOptions));
         }
         catch
         {

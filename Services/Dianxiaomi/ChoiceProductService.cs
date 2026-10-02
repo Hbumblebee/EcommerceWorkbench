@@ -177,8 +177,13 @@ public sealed class ChoiceProductService
 
     private static List<ChoiceVariantSkuGroup> ReadVariantRows(JsonElement product)
     {
+        // 与 JoomProductService 同一缺陷：variants 字段存在但读不出 SKU 时会短路掉字符串形态的兜底字段。
         if (product.TryGetProperty("variationList", out var variants) && variants.ValueKind == JsonValueKind.Array)
-            return ReadVariantArray(variants);
+        {
+            var fromArray = ReadVariantArray(variants);
+            if (fromArray.Count > 0)
+                return fromArray;
+        }
 
         foreach (var name in new[] { "variationJson", "variationListStr" })
         {

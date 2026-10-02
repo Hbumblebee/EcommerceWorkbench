@@ -693,8 +693,14 @@ public sealed class JoomProductService
 
     private static List<string> ReadVariants(JsonElement product)
     {
+        // 只要 variants 字段存在就返回会让空数组/无 sku 项短路掉 variantJson，
+        // 进而误报「未在【变种信息】中读到 SKU」。改为数组读不出 SKU 时继续尝试 variantJson。
         if (product.TryGetProperty("variants", out var variants) && variants.ValueKind == JsonValueKind.Array)
-            return ReadSkuColumn(variants);
+        {
+            var fromArray = ReadSkuColumn(variants);
+            if (fromArray.Count > 0)
+                return fromArray;
+        }
 
         if (product.TryGetProperty("variantJson", out var jsonEl)
             && jsonEl.ValueKind == JsonValueKind.String

@@ -90,6 +90,8 @@ public static class ClipboardHelper
             var target = GlobalLock(hGlobal);
             if (target == IntPtr.Zero)
             {
+                // 原实现直接返回，从不释放已分配的 HGLOBAL，属于泄漏。
+                GlobalFree(hGlobal);
                 return false;
             }
 
@@ -105,6 +107,8 @@ public static class ClipboardHelper
 
             if (SetClipboardData(CfUnicodeText, hGlobal) == IntPtr.Zero)
             {
+                // 失败时句柄所有权仍在本进程，必须释放。
+                GlobalFree(hGlobal);
                 return false;
             }
 
@@ -137,4 +141,7 @@ public static class ClipboardHelper
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GlobalUnlock(IntPtr hMem);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GlobalFree(IntPtr hMem);
 }
