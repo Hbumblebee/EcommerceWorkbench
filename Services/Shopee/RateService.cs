@@ -13,7 +13,7 @@ using EcommerceWorkbench.Models;
 
 namespace EcommerceWorkbench.Services.Shopee;
 
-public sealed class RateService
+public sealed class RateService : IDisposable
 {
     private const string ApiBase = "https://solutions.shopee.cn/sellers/pricing-simulator/api/";
     private const string EmbeddedResourceName = "EcommerceWorkbench.Data.tw-711-rates.json";
@@ -76,9 +76,16 @@ public sealed class RateService
                 .FirstOrDefault()
                 ?? throw new InvalidOperationException($"未找到渠道: {TargetChannelName}");
 
-            var zone = channel.Zones.FirstOrDefault(z => z.Name == TargetZoneName || z.CnName == TargetZoneName)
-                ?? channel.Zones.FirstOrDefault()
-                ?? throw new InvalidOperationException("未找到地区费率");
+            // 原实现找不到「所有地区」时静默取首个区县，会用错费率且界面无任何提示。
+            // 这里保留回退（渠道可能改名），但把回退事实带进来源说明与状态文案。
+            var zone = channel.Zones.FirstOrDefault(z => z.Name == TargetZoneName || z.CnName == TargetZoneName);
+            var zoneFallback = false;
+            if (zone is null)
+            {
+                zone = channel.Zones.FirstOrDefault()
+                    ?? throw new InvalidOperationException("未找到地区费率");
+                zoneFallback = true;
+            }
 
             Current = new EmbeddedRateBundle
             {
@@ -101,15 +108,19 @@ public sealed class RateService
             {
                 var cachePath = GetLocalCachePath();
                 Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
-                await File.WriteAllTextAsync(cachePath, JsonSerializer.Serialize(Current, JsonOptions), ct);
+                AtomicFile.WriteAllText(cachePath, JsonSerializer.Serialize(Current, JsonOptions));
             }
             catch
             {
                 // 本地缓存失败不影响主流程
             }
 
-            SourceDescription = $"在线刷新（费率日期 {Current.Date}）";
-            return (true, $"已刷新最新费率：{Current.Date}");
+            SourceDescription = zoneFallback
+                ? $"在线刷新（费率日期 {Current.Date}）⚠ 未找到「{TargetZoneName}」，已改用「{zone.CnName}」"
+                : $"在线刷新（费率日期 {Current.Date}）";
+            return (true, zoneFallback
+                ? $"已刷新最新费率：{Current.Date}（注意：未找到「{TargetZoneName}」区县，已改用「{zone.CnName}」，请人工核对）"
+                : $"已刷新最新费率：{Current.Date}");
         }
         catch (Exception ex)
         {
@@ -173,5 +184,7 @@ public sealed class RateService
     private static string GetLocalCachePath() => Path.Combine(AppPaths.DataDirectory, "tw-711-rates.json");
 
     private static double ParseRate(string? text, double fallback)
-        => double.TryParse(text, out var v) ? v : fallback;
+        => NumberParser.TryParseDouble(text, out var v) ? v : fallback;
+
+    public void Dispose() => _http.Dispose();
 }

@@ -62,6 +62,7 @@ public static class PricingCalculator
     public static PricingResult CalculateByExpectedProfit(PricingInput input, IReadOnlyList<FeeMode> feeModes)
     {
         var e = AlignWebsitePrecision(input);
+        EnsureDiscountUsable(e);
         var shipping = CalculateShippingFee(e.Weight, feeModes);
 
         // 与官网 xe() get_price_by_profit 同一条表达式，避免拆项造成 1 ulp 差
@@ -89,6 +90,7 @@ public static class PricingCalculator
     public static PricingResult CalculateByExpectedProfitRate(PricingInput input, IReadOnlyList<FeeMode> feeModes)
     {
         var e = AlignWebsitePrecision(input);
+        EnsureDiscountUsable(e);
         var shipping = CalculateShippingFee(e.Weight, feeModes);
 
         // 与官网 xe() get_price_by_profit_rate 同一条表达式
@@ -114,6 +116,17 @@ public static class PricingCalculator
         double n = ((o + m) / (1 - u) + p + f * c) / denom;
         double r = n * i;
         return BuildResult(e, shipping, o, n, r, s, c, l, u, p, f);
+    }
+
+    /// <summary>
+    /// 折扣 100% 会让 priceBeforeDiscount = n / 0 得到 Infinity，且原实现不做任何提示。
+    /// </summary>
+    private static void EnsureDiscountUsable(PricingInput e)
+    {
+        if (e.DiscountPercent >= 100)
+            throw new InvalidOperationException("折扣必须小于 100%");
+        if (e.DiscountPercent < 0)
+            throw new InvalidOperationException("折扣不能为负数");
     }
 
     private static PricingResult BuildResult(
@@ -193,7 +206,8 @@ public static class PricingCalculator
         if (modes.Count == 0 || weight <= 0)
             return;
 
-        var flat = modes.FirstOrDefault(m => m.Name == "Flat");
+        // 费率名按大小写不敏感比较：原实现用 == "Flat"，费率数据里只要不是这个精确写法就静默失效。
+        var flat = modes.FirstOrDefault(m => string.Equals(m.Name?.Trim(), "Flat", StringComparison.OrdinalIgnoreCase));
         if (flat != null)
         {
             fee = flat.OriginalFee ?? 0;
@@ -207,7 +221,7 @@ public static class PricingCalculator
         foreach (var mode in modes)
         {
             double start = mode.StartWeight ?? 0;
-            if (mode.Name == "WeightRange")
+            if (string.Equals(mode.Name?.Trim(), "WeightRange", StringComparison.OrdinalIgnoreCase))
             {
                 if (weight > start)
                 {
@@ -216,7 +230,7 @@ public static class PricingCalculator
                     parts.Add(amount.ToString("0.##"));
                 }
             }
-            else if (mode.Name == "Increment")
+            else if (string.Equals(mode.Name?.Trim(), "Increment", StringComparison.OrdinalIgnoreCase))
             {
                 if (weight > start)
                 {

@@ -48,18 +48,34 @@ public static class JoomCalculator
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        // NaN/∞ 会让 ResolveTier 的比较全部为 false（静默落到最高档）并产出 NaN 售价。
+        if (!double.IsFinite(costCny))
+            throw new InvalidOperationException("成本必须是有效数字");
+        if (!double.IsFinite(settings.ExchangeRate))
+            throw new InvalidOperationException("汇率必须是有效数字");
         if (settings.ExchangeRate == 0)
             throw new InvalidOperationException("汇率不能为 0");
 
         var (interval, commission, margin) = ResolveTier(costCny, settings);
+
+        if (!double.IsFinite(commission) || !double.IsFinite(margin))
+            throw new InvalidOperationException("佣金与毛利率必须是有效数字");
+
+        // 原实现只挡「|1-佣金-毛利率| < 1e-12」，>100% 时分母为负会静默产出负售价。
+        if (commission < 0 || margin < 0)
+            throw new InvalidOperationException("佣金与毛利率不能为负数");
+        if (commission + margin >= 1)
+            throw new InvalidOperationException("平台佣金与毛利率合计必须小于 100%");
+
         var denom = 1 - commission - margin;
-        if (Math.Abs(denom) < 1e-12)
-            throw new InvalidOperationException("平台佣金与毛利率合计不能为 100%");
 
         var priceUsd = Math.Round(
             costCny / settings.ExchangeRate / denom,
             2,
             MidpointRounding.AwayFromZero);
+
+        if (!double.IsFinite(priceUsd))
+            throw new InvalidOperationException("计算结果超出可表示范围，请检查成本与汇率");
 
         var profitCny = Math.Round(
             priceUsd * settings.ExchangeRate - costCny - priceUsd * commission * settings.ExchangeRate,
