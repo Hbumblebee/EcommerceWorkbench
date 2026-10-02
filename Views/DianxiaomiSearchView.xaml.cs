@@ -358,7 +358,7 @@ public partial class DianxiaomiSearchView : UserControl
             UpdateResultSummary();
             SetStatus($"搜索失败：{ex.Message}");
 
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
             {
                 InvalidateCookieBecauseExpired(ex.Message);
             }
@@ -406,14 +406,6 @@ public partial class DianxiaomiSearchView : UserControl
     {
         HitCountText.Text = $"{_lastRows.Count} 条";
         MissCountText.Text = $"{_missedSkus.Count} 个";
-    }
-
-    private static bool IsCookieInvalidError(string message)
-    {
-        return message.Contains("验证失败", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("code=2001", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("未登录", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("登录", StringComparison.OrdinalIgnoreCase) && message.Contains("失效", StringComparison.OrdinalIgnoreCase);
     }
 
     private void InvalidateCookieBecauseExpired(string detail)
