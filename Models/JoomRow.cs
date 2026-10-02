@@ -1,6 +1,7 @@
 /*
- * 功能说明：JOOM 定价表格行（可编辑 SKU/成本 + 自动计算结果）。
+ * 功能说明：JOOM 定价表格行（原页面 SKU、建议 SKU、搜索成本与自动计算结果）。
  * 创建日期：2026-09-05
+ * 修改记录：2026-10-02 增加建议 SKU 与详情页当前已应用 SKU
  */
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -11,6 +12,8 @@ public sealed class JoomRow : INotifyPropertyChanged
 {
     private int _index;
     private string? _pageSku;
+    private string? _suggestedSku;
+    private string? _appliedPageSku;
     private string? _sku;
     private double? _cost;
     private double? _weight;
@@ -34,6 +37,20 @@ public sealed class JoomRow : INotifyPropertyChanged
     {
         get => _pageSku;
         set => Set(ref _pageSku, value);
+    }
+
+    /// <summary>重复检测确认可用的新 SKU，仅展示；由用户决定是否应用到详情页。</summary>
+    public string? SuggestedSku
+    {
+        get => _suggestedSku;
+        set => Set(ref _suggestedSku, value);
+    }
+
+    /// <summary>详情页当前实际 SKU，用于应用、恢复以及价格回写匹配。</summary>
+    public string? AppliedPageSku
+    {
+        get => _appliedPageSku;
+        set => Set(ref _appliedPageSku, value);
     }
 
     /// <summary>用于店小秘商品搜索的 SKU，可编辑；默认等于页面 SKU。</summary>

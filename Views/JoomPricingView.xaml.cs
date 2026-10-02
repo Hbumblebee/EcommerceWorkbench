@@ -15,6 +15,8 @@
  *           2026-10-02 整页可滚动；重复提示至少露出 3 条，定价表至少露出 10 行
  *           2026-10-02 嵌套滚动区到达边界后自动把滚轮交给整页
  *           2026-10-02 整页、重复区与表格统一采用短距离缓动滚动
+ *           2026-10-02 建议 SKU 改为表格展示，由用户一键应用或恢复原 SKU
+ *           2026-10-02 读取详情页后搜索 SKU 默认去除原后缀
  */
 
 using System.Collections.ObjectModel;
@@ -533,7 +535,8 @@ public partial class JoomPricingView : UserControl
                 _rows.Add(new JoomRow
                 {
                     PageSku = group.PageSku,
-                    Sku = group.PageSku
+                    AppliedPageSku = group.PageSku,
+                    Sku = JoomSkuSuffix.StripCompositeBases(group.PageSku)
                 });
             }
 
@@ -607,7 +610,9 @@ public partial class JoomPricingView : UserControl
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in _rows)
         {
-            var pageSku = NormalizeSku(row.PageSku);
+            var pageSku = NormalizeSku(string.IsNullOrWhiteSpace(row.AppliedPageSku)
+                ? row.PageSku
+                : row.AppliedPageSku);
             if (pageSku.Length == 0 || string.IsNullOrWhiteSpace(row.PriceUsd) || row.Status != "OK")
                 continue;
             map.TryAdd(pageSku, row.PriceUsd);
@@ -696,6 +701,8 @@ public partial class JoomPricingView : UserControl
         {
             row.Sku = null;
             row.PageSku = null;
+            row.SuggestedSku = null;
+            row.AppliedPageSku = null;
             row.Cost = null;
             row.Weight = null;
             ClearResult(row);
@@ -827,6 +834,8 @@ public partial class JoomPricingView : UserControl
         _suggestGeneration++;
         _suggestTokens.Clear();
         _occupancies.Clear();
+        foreach (var row in _rows)
+            row.SuggestedSku = null;
         OccupancyTitle.Text = "";
         OccupancyPanel.Visibility = Visibility.Collapsed;
     }
@@ -928,7 +937,11 @@ public partial class JoomPricingView : UserControl
         if (_suppressSuggestion)
             return;
         if (sender is FrameworkElement element && element.DataContext is OccupancySkuGroup group)
+        {
             group.SuggestionUserEdited = true;
+            group.SuggestionAvailable = false;
+            RefreshSuggestedSkuColumn();
+        }
     }
 
     private async void SuggestedSku_LostFocus(object sender, RoutedEventArgs e)
@@ -944,6 +957,7 @@ public partial class JoomPricingView : UserControl
         group.SuggestedSku = sku;
         if (sku.Length == 0)
         {
+            group.SuggestionAvailable = false;
             group.SuggestStatus = "请填写建议 SKU";
             return;
         }
@@ -951,6 +965,7 @@ public partial class JoomPricingView : UserControl
         var conflict = LocalConflict(group, sku);
         if (conflict is not null)
         {
+            group.SuggestionAvailable = false;
             group.SuggestStatus = conflict;
             return;
         }
@@ -965,14 +980,17 @@ public partial class JoomPricingView : UserControl
                 return;
 
             var occupied = report.Hits.Any(hit => hit.Sku.Equals(sku, StringComparison.OrdinalIgnoreCase));
+            group.SuggestionAvailable = !occupied && report.FailedLocations.Count == 0;
             group.SuggestStatus = occupied
                 ? "修改后的 SKU 仍会产品重复"
-                : report.FailedLocations.Count == 0
+                : group.SuggestionAvailable
                     ? "修改后的 SKU 未被占用"
-                    : "修改后的 SKU 在已核对范围未被占用";
+                    : "部分范围未完成核对，暂不替换详情页";
+            RefreshSuggestedSkuColumn();
         }
         catch (Exception ex)
         {
+            group.SuggestionAvailable = false;
             group.SuggestStatus = "确认失败：" + ex.Message;
             SetStatus("确认建议 SKU 失败：" + ex.Message);
             if (IsCookieInvalidError(ex.Message))
@@ -1107,6 +1125,11 @@ public partial class JoomPricingView : UserControl
                         cookieHeader);
                     if (generation != _suggestGeneration)
                         return;
+                    if (report.FailedLocations.Count > 0)
+                    {
+                        throw new InvalidOperationException(
+                            "候选 SKU 未完成全部范围核对：" + string.Join("、", report.FailedLocations));
+                    }
 
                     foreach (var hit in report.Hits)
                         occupied.Add(hit.Sku);
@@ -1135,7 +1158,7 @@ public partial class JoomPricingView : UserControl
                         continue;
                     }
 
-                    SetSuggestion(group, candidate, "该后缀未被占用");
+                    SetSuggestion(group, candidate, "该后缀未被占用", available: true);
                 }
 
                 pending = still;
@@ -1147,6 +1170,8 @@ public partial class JoomPricingView : UserControl
                     continue;
                 SetSuggestion(group, "", "这些后缀都会产品重复，请改后缀或手动填写");
             }
+
+            RefreshSuggestedSkuColumn();
         }
         finally
         {
@@ -1228,13 +1253,144 @@ public partial class JoomPricingView : UserControl
         return null;
     }
 
-    private void SetSuggestion(OccupancySkuGroup group, string sku, string status)
+    private void RefreshSuggestedSkuColumn()
+    {
+        var available = _occupancies
+            .Where(group => group.SuggestionAvailable && !string.IsNullOrWhiteSpace(group.SuggestedSku))
+            .ToDictionary(group => group.Sku, group => NormalizeSku(group.SuggestedSku), StringComparer.OrdinalIgnoreCase);
+        foreach (var row in _rows)
+        {
+            var original = NormalizeSku(row.PageSku);
+            if (original.Length == 0)
+            {
+                row.SuggestedSku = null;
+                continue;
+            }
+
+            var parts = original.Split(
+                '+',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var changed = false;
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (!available.TryGetValue(parts[i], out var replacement))
+                    continue;
+                parts[i] = replacement;
+                changed = true;
+            }
+
+            row.SuggestedSku = changed ? string.Join("+", parts) : null;
+        }
+    }
+
+    private async void ApplySuggestedSkus_Click(object sender, RoutedEventArgs e)
+    {
+        await ChangePageSkusAsync(restoreOriginal: false);
+    }
+
+    private async void RestoreOriginalSkus_Click(object sender, RoutedEventArgs e)
+    {
+        await ChangePageSkusAsync(restoreOriginal: true);
+    }
+
+    private async Task ChangePageSkusAsync(bool restoreOriginal)
+    {
+        if (_busy)
+            return;
+
+        var changes = new List<(JoomRow Row, string From, string To)>();
+        foreach (var row in _rows)
+        {
+            var original = NormalizeSku(row.PageSku);
+            var applied = NormalizeSku(string.IsNullOrWhiteSpace(row.AppliedPageSku)
+                ? row.PageSku
+                : row.AppliedPageSku);
+            var target = restoreOriginal ? original : NormalizeSku(row.SuggestedSku);
+            if (applied.Length == 0
+                || target.Length == 0
+                || applied.Equals(target, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            changes.Add((row, applied, target));
+        }
+
+        if (changes.Count == 0)
+        {
+            MessageBox.Show(
+                restoreOriginal ? "没有需要恢复的 SKU。" : "没有已确认可用的建议 SKU。",
+                "提示",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var cookies = GetCookieRecords();
+        var editUrl = _openedEditUrl;
+        if (string.IsNullOrWhiteSpace(editUrl)
+            && JoomProductService.TryParseProduct(ProductUrlBox.Text, out _, out var parsedUrl))
+        {
+            editUrl = parsedUrl;
+        }
+
+        if (cookies is null || cookies.Count == 0 || string.IsNullOrWhiteSpace(editUrl))
+        {
+            MessageBox.Show("请先在「店小秘搜索」登录并打开 JOOM 产品详情页。", "提示",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            SetStatus(restoreOriginal ? "正在恢复详情页原 SKU…" : "正在应用建议 SKU 到详情页…");
+            await OpenProductWindowAsync(new Uri(editUrl), cookies, reload: false);
+            var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var change in changes)
+                replacements.TryAdd(change.From, change.To);
+            var result = await _productWindow!.ReplaceSkusAsync(replacements);
+            var missed = result.MissedPageSkus.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var change in changes.Where(change => !missed.Contains(change.From)))
+                change.Row.AppliedPageSku = change.To;
+
+            var action = restoreOriginal ? "恢复原 SKU" : "应用新 SKU";
+            var hint = $"已{action} {result.Updated} 条。请在店小秘页面确认后点击保存/发布。";
+            _productWindow.SetHint(hint);
+            SetStatus(hint);
+            if (!string.IsNullOrWhiteSpace(result.Error) || missed.Count > 0)
+            {
+                MessageBox.Show(
+                    hint + (missed.Count == 0 ? "" : "\n\n未匹配：" + string.Join("、", missed.Take(20)))
+                    + (string.IsNullOrWhiteSpace(result.Error) ? "" : "\n\n" + result.Error),
+                    action,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus("SKU 替换失败：" + ex.Message);
+            MessageBox.Show(ex.Message, "SKU 替换失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void SetSuggestion(
+        OccupancySkuGroup group,
+        string sku,
+        string status,
+        bool available = false)
     {
         _suppressSuggestion = true;
         try
         {
             group.SuggestedSku = sku;
             group.SuggestStatus = status;
+            group.SuggestionAvailable = available;
         }
         finally
         {
@@ -1283,6 +1439,7 @@ public partial class JoomPricingView : UserControl
         public ObservableCollection<string> ColorOptions { get; } = [];
         public ObservableCollection<OccupancyHitLine> Hits { get; } = [];
         public bool SuggestionUserEdited { get; set; }
+        public bool SuggestionAvailable { get; set; }
 
         public string BaseHint =>
             string.Equals(BaseSku, Sku, StringComparison.Ordinal)

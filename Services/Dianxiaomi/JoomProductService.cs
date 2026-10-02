@@ -6,6 +6,7 @@
  * 修改记录：2026-09-28 增加 SKU 占用查询（采集箱 / 待发布 / 在线）
  *           2026-09-28 占用结果带上店铺名称
  *           2026-09-28 SKU 占用改为检查全部店铺
+ *           2026-10-02 支持以 + 分隔的组合 SKU 逐项精确检查
  */
 
 using System.Collections.Concurrent;
@@ -166,7 +167,7 @@ public sealed class JoomProductService
             throw new InvalidOperationException("请先导出 Cookie。");
 
         var wanted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var sku in skus)
+        foreach (var sku in ExpandCompositeSkus(skus))
         {
             var key = (sku ?? "").Trim();
             if (key.Length == 0 || key.Contains(','))
@@ -292,7 +293,7 @@ public sealed class JoomProductService
                         continue;
 
                     var itemShop = NormalizeShopId(GetString(item, "shopId"));
-                    var visible = ReadVisibleSkus(item);
+                    var visible = ExpandCompositeSkus(ReadVisibleSkus(item));
                     if (!visible.Any(wanted.ContainsKey))
                     {
                         if (!tryConsumeEditFallback())
@@ -301,7 +302,8 @@ public sealed class JoomProductService
                             continue;
                         }
 
-                        visible = await TryReadEditSkusAsync(productId, cookieHeader, cancellationToken);
+                        visible = ExpandCompositeSkus(
+                            await TryReadEditSkusAsync(productId, cookieHeader, cancellationToken));
                     }
 
                     var parentSku = GetString(item, "parentSku").Trim();
@@ -486,6 +488,28 @@ public sealed class JoomProductService
         if (parentSku.Length > 0)
             list.Add(parentSku);
         return list;
+    }
+
+    /// <summary>
+    /// 店小秘部分列表会把多个变种 SKU 合并为「SKU1+SKU2+…」返回。
+    /// 占用检测按每个组成 SKU 精确比较，同时兼容普通单 SKU。
+    /// </summary>
+    private static List<string> ExpandCompositeSkus(IEnumerable<string> values)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values)
+        {
+            foreach (var part in (value ?? "").Split(
+                         '+',
+                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (part.Length > 0 && seen.Add(part))
+                    result.Add(part);
+            }
+        }
+
+        return result;
     }
 
     private static List<string> ParseSkuJson(string? json)

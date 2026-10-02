@@ -1,8 +1,9 @@
 /*
- * 功能说明：用已导出 Cookie 打开店小秘 JOOM 产品编辑页，并向变种表写入 MSRP/价格。
+ * 功能说明：用已导出 Cookie 打开店小秘 JOOM 产品编辑页，并向变种表写入 SKU、MSRP/价格。
  * 创建日期：2026-09-05
  * 更新日期：2026-09-12 详情页为独立窗口，不压在工作台上面
  * 修改记录：2026-09-28 多个详情窗共用同一个 WebView2 环境，避免后开窗口占用用户数据目录失败
+ *           2026-10-02 支持把已确认可用的新 SKU 替换到变种信息
  */
 
 using System.IO;
@@ -63,6 +64,24 @@ public partial class JoomProductPageWindow : Window
         await WaitUntilSkuTableReadyAsync(cancellationToken);
         var mapJson = JsonSerializer.Serialize(pageSkuToPrice);
         var script = WriteScriptPrefix + mapJson + WriteScriptSuffix;
+        var raw = await Browser.CoreWebView2.ExecuteScriptAsync(script);
+        return ParseWriteResult(raw);
+    }
+
+    public async Task<JoomPageWriteResult> ReplaceSkusAsync(
+        IReadOnlyDictionary<string, string> oldSkuToNewSku,
+        CancellationToken cancellationToken = default)
+    {
+        if (oldSkuToNewSku.Count == 0)
+            return new JoomPageWriteResult();
+
+        await EnsureCoreAsync();
+        if (Browser.CoreWebView2 is null)
+            return new JoomPageWriteResult { Error = "产品详情页尚未初始化。" };
+
+        await WaitUntilSkuTableReadyAsync(cancellationToken);
+        var mapJson = JsonSerializer.Serialize(oldSkuToNewSku);
+        var script = ReplaceSkuScriptPrefix + mapJson + ReplaceSkuScriptSuffix;
         var raw = await Browser.CoreWebView2.ExecuteScriptAsync(script);
         return ParseWriteResult(raw);
     }
@@ -327,6 +346,43 @@ public partial class JoomProductPageWindow : Window
             row.msrp = text;
             row.price = text;
             seen[sku.toLowerCase()] = true;
+            updated += 1;
+          }
+          const missed = [];
+          for (const key of Object.keys(map)) {
+            if (!seen[key.toLowerCase()]) missed.push(key);
+          }
+          return { updated: updated, missed: missed };
+        })();
+        """;
+
+    private const string ReplaceSkuScriptPrefix = """
+        (function () {
+          const map =
+        """;
+
+    private const string ReplaceSkuScriptSuffix = """
+        ;
+          function lookup(sku) {
+            if (!sku) return null;
+            if (Object.prototype.hasOwnProperty.call(map, sku)) return map[sku];
+            const lower = String(sku).toLowerCase();
+            for (const key of Object.keys(map)) {
+              if (key.toLowerCase() === lower) return map[key];
+            }
+            return null;
+          }
+          const rows = window.__dxmJoomFindSkuRows && window.__dxmJoomFindSkuRows();
+          if (!rows || !rows.length) return { updated: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
+          const seen = {};
+          let updated = 0;
+          for (const row of rows) {
+            const oldSku = String(row.sku || '').trim();
+            if (!oldSku) continue;
+            const newSku = lookup(oldSku);
+            if (newSku == null || String(newSku).trim() === '') continue;
+            row.sku = String(newSku).trim();
+            seen[oldSku.toLowerCase()] = true;
             updated += 1;
           }
           const missed = [];

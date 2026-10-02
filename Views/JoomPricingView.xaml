@@ -255,8 +255,16 @@
                     <Button Content="检查SKU占用"
                             Style="{StaticResource GhostButton}"
                             Click="CheckOccupancy_Click"
-                            Margin="0"
                             ToolTip="用当前「页面SKU」查询采集箱、待发布、在线产品。若产品重复，按后缀生成可修改的新 SKU"/>
+                    <Button Content="应用新SKU"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="ApplySuggestedSkus_Click"
+                            ToolTip="把表格中已确认可用的建议 SKU 一键替换到详情页变种信息"/>
+                    <Button Content="恢复原SKU"
+                            Style="{StaticResource GhostButton}"
+                            Click="RestoreOriginalSkus_Click"
+                            Margin="0"
+                            ToolTip="把详情页中已应用的新 SKU 一键恢复为页面原 SKU"/>
                 </WrapPanel>
                 <Expander Style="{StaticResource SectionExpander}"
                           IsExpanded="False"
@@ -474,6 +482,9 @@
                     <DataGridTextColumn Header="#" Binding="{Binding Index}" IsReadOnly="True" Width="44"/>
                     <DataGridTextColumn Header="页面SKU" Binding="{Binding PageSku}" IsReadOnly="True" Width="*"
                                         MinWidth="120"
+                                        ElementStyle="{StaticResource ReadSkuCell}"/>
+                    <DataGridTextColumn Header="建议SKU" Binding="{Binding SuggestedSku}" IsReadOnly="True" Width="*"
+                                        MinWidth="140"
                                         ElementStyle="{StaticResource ReadSkuCell}"/>
                     <DataGridTextColumn Header="搜索SKU" Binding="{Binding Sku, UpdateSourceTrigger=LostFocus}" Width="*"
                                         MinWidth="120"
