@@ -30,8 +30,6 @@ public sealed class ShippingFeeResult
 {
     public double HiddenFee { get; set; }
     public double BuyerFee { get; set; }
-    public string HiddenFeeFormula { get; set; } = "";
-    public string BuyerFeeFormula { get; set; } = "";
 }
 
 public sealed class PricingResult
@@ -50,8 +48,6 @@ public sealed class PricingResult
     public double HiddenFee { get; set; }
     public double BuyerSf { get; set; }
     public double WithdrawHf { get; set; }
-    public string HiddenFeeFormula { get; set; } = "";
-    public string BuyerFeeFormula { get; set; } = "";
 }
 
 public static class PricingCalculator
@@ -167,9 +163,7 @@ public static class PricingCalculator
             SellerSf = Round2(p + f),
             HiddenFee = Round2(p),
             BuyerSf = Round2(f),
-            WithdrawHf = Round2(withdraw),
-            HiddenFeeFormula = shipping.HiddenFeeFormula,
-            BuyerFeeFormula = shipping.BuyerFeeFormula
+            WithdrawHf = Round2(withdraw)
         };
     }
 
@@ -178,45 +172,34 @@ public static class PricingCalculator
     /// </summary>
     public static ShippingFeeResult CalculateShippingFee(double weight, IReadOnlyList<FeeMode> feeModes)
     {
-        var result = new ShippingFeeResult();
-        CalcSide(weight, feeModes, "Seller", out var hidden, out var hiddenFormula);
-        CalcSide(weight, feeModes, "Buyer", out var buyer, out var buyerFormula);
-        result.HiddenFee = hidden;
-        result.BuyerFee = buyer;
-        result.HiddenFeeFormula = hiddenFormula;
-        result.BuyerFeeFormula = buyerFormula;
-        return result;
+        return new ShippingFeeResult
+        {
+            HiddenFee = CalcSide(weight, feeModes, "Seller"),
+            BuyerFee = CalcSide(weight, feeModes, "Buyer")
+        };
     }
 
-    private static void CalcSide(
+    private static double CalcSide(
         double weight,
         IReadOnlyList<FeeMode> feeModes,
-        string type,
-        out double fee,
-        out string formula)
+        string type)
     {
-        fee = 0;
-        formula = "";
-
         var modes = feeModes
             .Where(m => string.Equals(m.Type, type, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(m => m.EndWeight ?? double.PositiveInfinity)
             .ToList();
 
         if (modes.Count == 0 || weight <= 0)
-            return;
+            return 0;
 
         // 费率名按大小写不敏感比较：原实现用 == "Flat"，费率数据里只要不是这个精确写法就静默失效。
         var flat = modes.FirstOrDefault(m => string.Equals(m.Name?.Trim(), "Flat", StringComparison.OrdinalIgnoreCase));
         if (flat != null)
         {
-            fee = flat.OriginalFee ?? 0;
-            formula = fee.ToString("0.##");
-            return;
+            return flat.OriginalFee ?? 0;
         }
 
         double sum = 0;
-        var parts = new List<string>();
 
         foreach (var mode in modes)
         {
@@ -225,9 +208,7 @@ public static class PricingCalculator
             {
                 if (weight > start)
                 {
-                    double amount = mode.OriginalFee ?? 0;
-                    sum += amount;
-                    parts.Add(amount.ToString("0.##"));
+                    sum += mode.OriginalFee ?? 0;
                 }
             }
             else if (string.Equals(mode.Name?.Trim(), "Increment", StringComparison.OrdinalIgnoreCase))
@@ -245,15 +226,12 @@ public static class PricingCalculator
                         span = 0;
 
                     double steps = Math.Ceiling(span / unit);
-                    double add = steps * amount;
-                    sum += add;
-                    parts.Add($"向上取整(({Math.Min(weight, end)}-{start})/{unit})*{amount}");
+                    sum += steps * amount;
                 }
             }
         }
 
-        fee = sum;
-        formula = string.Join("+", parts);
+        return sum;
     }
 
     /// <summary>

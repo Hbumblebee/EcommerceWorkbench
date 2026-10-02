@@ -15,17 +15,33 @@ public sealed class JoomTierParams
 public sealed class JoomSettings
 {
     public const double DefaultExchangeRate = 6.3;
+    public const double DefaultCommissionPercent = 15;
+    public const double DefaultLowMarginPercent = 50;
+    public const double DefaultMidMarginPercent = 45;
+    public const double DefaultHighMarginPercent = 40;
 
     public double ExchangeRate { get; set; } = DefaultExchangeRate;
 
     /// <summary>成本 ≤ 10 元。</summary>
-    public JoomTierParams Low { get; set; } = new() { Commission = 0.15, Margin = 0.50 };
+    public JoomTierParams Low { get; set; } = new()
+    {
+        Commission = DefaultCommissionPercent / 100.0,
+        Margin = DefaultLowMarginPercent / 100.0
+    };
 
     /// <summary>10 元 &lt; 成本 ≤ 20 元。</summary>
-    public JoomTierParams Mid { get; set; } = new() { Commission = 0.15, Margin = 0.45 };
+    public JoomTierParams Mid { get; set; } = new()
+    {
+        Commission = DefaultCommissionPercent / 100.0,
+        Margin = DefaultMidMarginPercent / 100.0
+    };
 
     /// <summary>成本 &gt; 20 元。</summary>
-    public JoomTierParams High { get; set; } = new() { Commission = 0.15, Margin = 0.40 };
+    public JoomTierParams High { get; set; } = new()
+    {
+        Commission = DefaultCommissionPercent / 100.0,
+        Margin = DefaultHighMarginPercent / 100.0
+    };
 }
 
 public sealed class JoomCalcResult

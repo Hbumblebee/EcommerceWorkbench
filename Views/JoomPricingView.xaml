@@ -152,7 +152,7 @@
                         <Border Background="{StaticResource AccentSoftBrush}" Padding="12,10" Margin="0,0,14,8" CornerRadius="8">
                             <StackPanel>
                                 <TextBlock Text="汇率 CNY→USD" FontWeight="Bold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,6"/>
-                                <TextBox x:Name="RateBox" Width="110" Text="6.3"
+                                <TextBox x:Name="RateBox" Width="110"
                                          HorizontalContentAlignment="Right"
                                          LostFocus="Param_LostFocus"/>
                             </StackPanel>
@@ -163,11 +163,11 @@
                                 <StackPanel Orientation="Horizontal">
                                     <StackPanel Margin="0,0,10,0">
                                         <TextBlock Text="平台佣金 %" Style="{StaticResource ParamLabel}"/>
-                                        <TextBox x:Name="LowCommissionBox" Style="{StaticResource ParamBox}" Text="15" LostFocus="Param_LostFocus"/>
+                                        <TextBox x:Name="LowCommissionBox" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
                                     </StackPanel>
                                     <StackPanel>
                                         <TextBlock Text="毛利率 %" Style="{StaticResource ParamLabel}"/>
-                                        <TextBox x:Name="LowMarginBox" Style="{StaticResource ParamBox}" Text="50" LostFocus="Param_LostFocus"/>
+                                        <TextBox x:Name="LowMarginBox" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>
@@ -178,11 +178,11 @@
                                 <StackPanel Orientation="Horizontal">
                                     <StackPanel Margin="0,0,10,0">
                                         <TextBlock Text="平台佣金 %" Style="{StaticResource ParamLabel}"/>
-                                        <TextBox x:Name="MidCommissionBox" Style="{StaticResource ParamBox}" Text="15" LostFocus="Param_LostFocus"/>
+                                        <TextBox x:Name="MidCommissionBox" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
                                     </StackPanel>
                                     <StackPanel>
                                         <TextBlock Text="毛利率 %" Style="{StaticResource ParamLabel}"/>
-                                        <TextBox x:Name="MidMarginBox" Style="{StaticResource ParamBox}" Text="45" LostFocus="Param_LostFocus"/>
+                                        <TextBox x:Name="MidMarginBox" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>
@@ -193,11 +193,11 @@
                                 <StackPanel Orientation="Horizontal">
                                     <StackPanel Margin="0,0,10,0">
                                         <TextBlock Text="平台佣金 %" Style="{StaticResource ParamLabel}"/>
-                                        <TextBox x:Name="HighCommissionBox" Style="{StaticResource ParamBox}" Text="15" LostFocus="Param_LostFocus"/>
+                                        <TextBox x:Name="HighCommissionBox" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
                                     </StackPanel>
                                     <StackPanel>
                                         <TextBlock Text="毛利率 %" Style="{StaticResource ParamLabel}"/>
-                                        <TextBox x:Name="HighMarginBox" Style="{StaticResource ParamBox}" Text="40" LostFocus="Param_LostFocus"/>
+                                        <TextBox x:Name="HighMarginBox" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>

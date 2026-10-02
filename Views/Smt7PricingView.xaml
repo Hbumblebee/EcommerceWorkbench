@@ -145,42 +145,42 @@
                                 <TextBlock Grid.Row="0" Grid.Column="4" Text="毛利% (仅参考)" Style="{StaticResource ParamHeader}"
                                            ToolTip="此列只作展示，不参与全托2.0 公式。售价只由分子1/常量/分子2 与重量加价决定。"/>
 
-                                <TextBox x:Name="CostMaxBox1" Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamBox}" Text="2" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor1Box1" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostConstBox1" Grid.Row="1" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor2Box1" Grid.Row="1" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostMarginBox1" Grid.Row="1" Grid.Column="4" Style="{StaticResource ParamBox}" Text="35" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMaxBox1" Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box1" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox1" Grid.Row="1" Grid.Column="2" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box1" Grid.Row="1" Grid.Column="3" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox1" Grid.Row="1" Grid.Column="4" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
 
-                                <TextBox x:Name="CostMaxBox2" Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamBox}" Text="4" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor1Box2" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.55" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostConstBox2" Grid.Row="2" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor2Box2" Grid.Row="2" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostMarginBox2" Grid.Row="2" Grid.Column="4" Style="{StaticResource ParamBox}" Text="30" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMaxBox2" Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box2" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox2" Grid.Row="2" Grid.Column="2" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box2" Grid.Row="2" Grid.Column="3" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox2" Grid.Row="2" Grid.Column="4" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
 
-                                <TextBox x:Name="CostMaxBox3" Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamBox}" Text="8" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor1Box3" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.58" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostConstBox3" Grid.Row="3" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor2Box3" Grid.Row="3" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostMarginBox3" Grid.Row="3" Grid.Column="4" Style="{StaticResource ParamBox}" Text="25" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMaxBox3" Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box3" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox3" Grid.Row="3" Grid.Column="2" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box3" Grid.Row="3" Grid.Column="3" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox3" Grid.Row="3" Grid.Column="4" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
 
-                                <TextBox x:Name="CostMaxBox4" Grid.Row="4" Grid.Column="0" Style="{StaticResource ParamBox}" Text="20" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor1Box4" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.60" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostConstBox4" Grid.Row="4" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor2Box4" Grid.Row="4" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostMarginBox4" Grid.Row="4" Grid.Column="4" Style="{StaticResource ParamBox}" Text="25" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMaxBox4" Grid.Row="4" Grid.Column="0" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box4" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox4" Grid.Row="4" Grid.Column="2" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box4" Grid.Row="4" Grid.Column="3" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox4" Grid.Row="4" Grid.Column="4" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
 
-                                <TextBox x:Name="CostMaxBox5" Grid.Row="5" Grid.Column="0" Style="{StaticResource ParamBox}" Text="30" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor1Box5" Grid.Row="5" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.62" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostConstBox5" Grid.Row="5" Grid.Column="2" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor2Box5" Grid.Row="5" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostMarginBox5" Grid.Row="5" Grid.Column="4" Style="{StaticResource ParamBox}" Text="27" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMaxBox5" Grid.Row="5" Grid.Column="0" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box5" Grid.Row="5" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox5" Grid.Row="5" Grid.Column="2" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box5" Grid.Row="5" Grid.Column="3" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox5" Grid.Row="5" Grid.Column="4" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
 
                                 <TextBox Grid.Row="6" Grid.Column="0" Style="{StaticResource ParamBox}" Text="其余" IsReadOnly="True"
                                          HorizontalContentAlignment="Center" Background="#EEF2F6"/>
-                                <TextBox x:Name="CostFactor1Box6" Grid.Row="6" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.65" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostConstBox6" Grid.Row="6" Grid.Column="2" Style="{StaticResource ParamBox}" Text="1.00" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostFactor2Box6" Grid.Row="6" Grid.Column="3" Style="{StaticResource ParamBox}" Text="0.94" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="CostMarginBox6" Grid.Row="6" Grid.Column="4" Style="{StaticResource ParamBox}" Text="25" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor1Box6" Grid.Row="6" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostConstBox6" Grid.Row="6" Grid.Column="2" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostFactor2Box6" Grid.Row="6" Grid.Column="3" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="CostMarginBox6" Grid.Row="6" Grid.Column="4" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
                             </Grid>
                         </StackPanel>
                     </Border>
@@ -205,18 +205,18 @@
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="换算重量&lt;(kg)" Style="{StaticResource ParamHeader}"/>
                                 <TextBlock Grid.Row="0" Grid.Column="1" Text="加价" Style="{StaticResource ParamHeader}"/>
 
-                                <TextBox x:Name="WeightMaxBox1" Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" Text="0.2" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="WeightMarkupBox1" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMaxBox1" Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMarkupBox1" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
 
-                                <TextBox x:Name="WeightMaxBox2" Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" Text="0.5" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="WeightMarkupBox2" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamBox}" Text="0.50" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMaxBox2" Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMarkupBox2" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
 
-                                <TextBox x:Name="WeightMaxBox3" Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" Text="1" LostFocus="Param_LostFocus"/>
-                                <TextBox x:Name="WeightMarkupBox3" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamBox}" Text="1.00" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMaxBox3" Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMarkupBox3" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
 
                                 <TextBox Grid.Row="4" Grid.Column="0" Style="{StaticResource ParamBox}" Width="88" Text="其余" IsReadOnly="True"
                                          HorizontalContentAlignment="Center" Background="#EEF2F6"/>
-                                <TextBox x:Name="WeightMarkupBox4" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamBox}" Text="2.00" LostFocus="Param_LostFocus"/>
+                                <TextBox x:Name="WeightMarkupBox4" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamBox}" LostFocus="Param_LostFocus"/>
                             </Grid>
                         </StackPanel>
                     </Border>

@@ -128,9 +128,7 @@ public sealed class ProductSearchService
         {
             Rows = ordered,
             MissedSkus = missed,
-            RawResponse = $"[single-request, count={searchValues.Count}, http={status}]\n{responseBody}",
-            RequestedValueCount = searchValues.Count,
-            BatchCount = 1
+            RequestedValueCount = searchValues.Count
         };
     }
 
@@ -295,7 +293,5 @@ public sealed class ProductSearchOutcome
 {
     public List<ProductResultRow> Rows { get; init; } = [];
     public List<string> MissedSkus { get; init; } = [];
-    public string RawResponse { get; init; } = string.Empty;
     public int RequestedValueCount { get; init; }
-    public int BatchCount { get; init; }
 }
