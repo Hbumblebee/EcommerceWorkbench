@@ -4,6 +4,7 @@
  * 更新日期：2026-09-12 详情页为独立窗口，不压在工作台上面
  * 修改记录：2026-09-28 多个详情窗共用同一个 WebView2 环境，避免后开窗口占用用户数据目录失败
  *           2026-10-02 支持把已确认可用的新 SKU 替换到变种信息
+ *           2026-10-03 注入层契约自检（探测 joomSkuDataStore 是否存在）+ 写后回读验证（Verified）
  */
 
 using System.IO;
@@ -164,6 +165,7 @@ public partial class JoomProductPageWindow : Window
     private async Task WaitUntilSkuTableReadyAsync(CancellationToken cancellationToken)
     {
         const int maxTries = 40;
+        var storeFound = false;
         for (var i = 0; i < maxTries; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -172,23 +174,34 @@ public partial class JoomProductPageWindow : Window
 
             await Browser.CoreWebView2.ExecuteScriptAsync(FinderScript);
             var raw = await Browser.CoreWebView2.ExecuteScriptAsync(ReadyScript);
-            if (IsReady(raw))
+            var ready = IsReady(raw, out var storeFoundNow);
+            storeFound |= storeFoundNow;
+            if (ready)
                 return;
 
             await Task.Delay(500, cancellationToken);
         }
 
+        // 契约自检：整个等待期内连 joomSkuDataStore 都没找到，说明店小秘页面结构已变更
+        // 或根本不在编辑页；与「表格还没加载完」区分开，避免用户误以为多点几次重试就行。
+        if (!storeFound)
+            throw new InvalidOperationException(
+                "未在页面上找到变种表格对应的前端数据（joomSkuDataStore）。店小秘页面结构可能已变更，本工作台需要更新后再使用。");
+
         throw new InvalidOperationException("页面变种表格尚未加载完成。请确认已登录且详情页已打开，然后重试回写。");
     }
 
-    private static bool IsReady(string? executeResult)
+    private static bool IsReady(string? executeResult, out bool storeFound)
     {
+        storeFound = false;
         var json = UnwrapExecuteScriptResult(executeResult);
         if (string.IsNullOrWhiteSpace(json))
             return false;
         try
         {
             using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("store", out var storeEl) && storeEl.ValueKind == JsonValueKind.True)
+                storeFound = true;
             return doc.RootElement.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True;
         }
         catch
@@ -209,6 +222,7 @@ public partial class JoomProductPageWindow : Window
             var root = doc.RootElement;
             var error = root.TryGetProperty("error", out var errEl) ? errEl.GetString() : null;
             var updated = root.TryGetProperty("updated", out var uEl) && uEl.TryGetInt32(out var n) ? n : 0;
+            var verified = root.TryGetProperty("verified", out var vEl) && vEl.TryGetInt32(out var vn) ? vn : 0;
             var missed = new List<string>();
             if (root.TryGetProperty("missed", out var missedEl) && missedEl.ValueKind == JsonValueKind.Array)
             {
@@ -223,6 +237,7 @@ public partial class JoomProductPageWindow : Window
             return new JoomPageWriteResult
             {
                 Updated = updated,
+                Verified = verified,
                 MissedPageSkus = missed,
                 Error = string.IsNullOrWhiteSpace(error) ? null : error
             };
@@ -308,12 +323,26 @@ public partial class JoomProductPageWindow : Window
           }
           return fromApp() || fromVueTree();
         };
+        window.__dxmJoomFindSkuStore = function () {
+          // 契约自检：joomSkuDataStore 是否存在。不存在说明页面结构已变更或根本不在编辑页。
+          try {
+            const el = document.querySelector('#app');
+            const app = el && el.__vue_app__;
+            const pinia = app && app.config && app.config.globalProperties && app.config.globalProperties.$pinia;
+            if (pinia && pinia._s && typeof pinia._s.get === 'function') {
+              if (pinia._s.get('joomSkuDataStore')) return true;
+            }
+            if (pinia && pinia.state && pinia.state.value && pinia.state.value.joomSkuDataStore) return true;
+          } catch (e) {}
+          return false;
+        };
         """;
 
     private const string ReadyScript = """
         (function () {
           const rows = window.__dxmJoomFindSkuRows && window.__dxmJoomFindSkuRows();
-          return { ok: !!(rows && rows.length) };
+          const store = !!(window.__dxmJoomFindSkuStore && window.__dxmJoomFindSkuStore());
+          return { ok: !!(rows && rows.length), store: store };
         })();
         """;
 
@@ -334,9 +363,10 @@ public partial class JoomProductPageWindow : Window
             return null;
           }
           const rows = window.__dxmJoomFindSkuRows && window.__dxmJoomFindSkuRows();
-          if (!rows || !rows.length) return { updated: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
+          if (!rows || !rows.length) return { updated: 0, verified: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
           const seen = {};
           let updated = 0;
+          let verified = 0;
           for (const row of rows) {
             const sku = String(row.sku || '').trim();
             if (!sku) continue;
@@ -345,6 +375,8 @@ public partial class JoomProductPageWindow : Window
             const text = String(price);
             row.msrp = text;
             row.price = text;
+            // 写后回读：赋值成功且读回一致才算 verified，避免「赋了值但页面没生效」的假成功。
+            if (Number(String(row.msrp)) === Number(text) && Number(String(row.price)) === Number(text)) verified += 1;
             seen[sku.toLowerCase()] = true;
             updated += 1;
           }
@@ -352,7 +384,7 @@ public partial class JoomProductPageWindow : Window
           for (const key of Object.keys(map)) {
             if (!seen[key.toLowerCase()]) missed.push(key);
           }
-          return { updated: updated, missed: missed };
+          return { updated: updated, verified: verified, missed: missed };
         })();
         """;
 
@@ -373,15 +405,18 @@ public partial class JoomProductPageWindow : Window
             return null;
           }
           const rows = window.__dxmJoomFindSkuRows && window.__dxmJoomFindSkuRows();
-          if (!rows || !rows.length) return { updated: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
+          if (!rows || !rows.length) return { updated: 0, verified: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
           const seen = {};
           let updated = 0;
+          let verified = 0;
           for (const row of rows) {
             const oldSku = String(row.sku || '').trim();
             if (!oldSku) continue;
             const newSku = lookup(oldSku);
             if (newSku == null || String(newSku).trim() === '') continue;
             row.sku = String(newSku).trim();
+            // 写后回读：SKU 替换同样回读确认。
+            if (String(row.sku).trim() === String(newSku).trim()) verified += 1;
             seen[oldSku.toLowerCase()] = true;
             updated += 1;
           }
@@ -389,7 +424,7 @@ public partial class JoomProductPageWindow : Window
           for (const key of Object.keys(map)) {
             if (!seen[key.toLowerCase()]) missed.push(key);
           }
-          return { updated: updated, missed: missed };
+          return { updated: updated, verified: verified, missed: missed };
         })();
         """;
 }
@@ -397,6 +432,8 @@ public partial class JoomProductPageWindow : Window
 public sealed class JoomPageWriteResult
 {
     public int Updated { get; init; }
+    /// <summary>写入后回读确认与目标值一致的条数。</summary>
+    public int Verified { get; init; }
     public List<string> MissedPageSkus { get; init; } = [];
     public string? Error { get; init; }
 }

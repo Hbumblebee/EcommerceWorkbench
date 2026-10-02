@@ -2,6 +2,7 @@
  * 功能说明：用已导出 Cookie 打开店小秘速卖通全托管编辑页，读取变种 SKU、货品条码与货品重量，并回写供货价。
  * 创建日期：2026-09-13
  * 更新日期：2026-09-13 读取货品条码与 packageWeight，供按条码匹配重量
+ * 修改记录：2026-10-03 注入层契约自检（探测 smtChoiceSkuDataStore 是否存在）+ 写后回读验证（Verified）
  */
 
 using System.Globalization;
@@ -56,12 +57,6 @@ public partial class Smt7ProductPageWindow : Window
         await WaitUntilSkuTableReadyAsync(cancellationToken);
         var raw = await Browser.CoreWebView2.ExecuteScriptAsync(ReadVariantScript);
         return ParseVariantRows(raw);
-    }
-
-    public async Task<IReadOnlyList<string>> ReadUniqueSkuCodesAsync(CancellationToken cancellationToken = default)
-    {
-        var rows = await ReadVariantRowsAsync(cancellationToken);
-        return ChoiceProductService.GroupUniqueSkus(rows).Select(g => g.PageSku).ToList();
     }
 
     public async Task<Smt7PageWriteResult> WritePricesAsync(
@@ -140,6 +135,7 @@ public partial class Smt7ProductPageWindow : Window
     private async Task WaitUntilSkuTableReadyAsync(CancellationToken cancellationToken)
     {
         const int maxTries = 40;
+        var storeFound = false;
         for (var i = 0; i < maxTries; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -148,23 +144,33 @@ public partial class Smt7ProductPageWindow : Window
 
             await Browser.CoreWebView2.ExecuteScriptAsync(FinderScript);
             var raw = await Browser.CoreWebView2.ExecuteScriptAsync(ReadyScript);
-            if (IsReady(raw))
+            var ready = IsReady(raw, out var storeFoundNow);
+            storeFound |= storeFoundNow;
+            if (ready)
                 return;
 
             await Task.Delay(500, cancellationToken);
         }
 
+        // 契约自检：连 smtChoiceSkuDataStore 都没找到说明页面结构已变更或不在编辑页。
+        if (!storeFound)
+            throw new InvalidOperationException(
+                "未在页面上找到变种表格对应的前端数据（smtChoiceSkuDataStore）。店小秘页面结构可能已变更，本工作台需要更新后再使用。");
+
         throw new InvalidOperationException("页面变种表格尚未加载完成。请确认已登录且详情页已打开，然后重试。");
     }
 
-    private static bool IsReady(string? executeResult)
+    private static bool IsReady(string? executeResult, out bool storeFound)
     {
+        storeFound = false;
         var json = UnwrapExecuteScriptResult(executeResult);
         if (string.IsNullOrWhiteSpace(json))
             return false;
         try
         {
             using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("store", out var storeEl) && storeEl.ValueKind == JsonValueKind.True)
+                storeFound = true;
             return doc.RootElement.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True;
         }
         catch
@@ -251,6 +257,7 @@ public partial class Smt7ProductPageWindow : Window
             var root = doc.RootElement;
             var error = root.TryGetProperty("error", out var errEl) ? errEl.GetString() : null;
             var updated = root.TryGetProperty("updated", out var uEl) && uEl.TryGetInt32(out var n) ? n : 0;
+            var verified = root.TryGetProperty("verified", out var vEl) && vEl.TryGetInt32(out var vn) ? vn : 0;
             var missed = new List<string>();
             if (root.TryGetProperty("missed", out var missedEl) && missedEl.ValueKind == JsonValueKind.Array)
             {
@@ -265,6 +272,7 @@ public partial class Smt7ProductPageWindow : Window
             return new Smt7PageWriteResult
             {
                 Updated = updated,
+                Verified = verified,
                 MissedPageSkus = missed,
                 Error = string.IsNullOrWhiteSpace(error) ? null : error
             };
@@ -359,12 +367,26 @@ public partial class Smt7ProductPageWindow : Window
           }
           return fromApp() || fromVueTree();
         };
+        window.__dxmSmtFindSkuStore = function () {
+          // 契约自检：smtChoiceSkuDataStore 是否存在。不存在说明页面结构已变更或根本不在编辑页。
+          try {
+            const el = document.querySelector('#app');
+            const app = el && el.__vue_app__;
+            const pinia = app && app.config && app.config.globalProperties && app.config.globalProperties.$pinia;
+            if (pinia && pinia._s && typeof pinia._s.get === 'function') {
+              if (pinia._s.get('smtChoiceSkuDataStore')) return true;
+            }
+            if (pinia && pinia.state && pinia.state.value && pinia.state.value.smtChoiceSkuDataStore) return true;
+          } catch (e) {}
+          return false;
+        };
         """;
 
     private const string ReadyScript = """
         (function () {
           const rows = window.__dxmSmtFindSkuRows && window.__dxmSmtFindSkuRows();
-          return { ok: !!(rows && rows.length) };
+          const store = !!(window.__dxmSmtFindSkuStore && window.__dxmSmtFindSkuStore());
+          return { ok: !!(rows && rows.length), store: store };
         })();
         """;
 
@@ -408,9 +430,10 @@ public partial class Smt7ProductPageWindow : Window
             return null;
           }
           const rows = window.__dxmSmtFindSkuRows && window.__dxmSmtFindSkuRows();
-          if (!rows || !rows.length) return { updated: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
+          if (!rows || !rows.length) return { updated: 0, verified: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
           const seen = {};
           let updated = 0;
+          let verified = 0;
           for (const row of rows) {
             const sku = String(row.skuCode || row.sku || '').trim();
             if (!sku) continue;
@@ -419,6 +442,8 @@ public partial class Smt7ProductPageWindow : Window
             const text = String(price);
             const num = Number(text);
             row.skuPrice = Number.isFinite(num) ? num : text;
+            // 写后回读：赋值成功且读回一致才算 verified，避免「赋了值但页面没生效」的假成功。
+            if (Number(String(row.skuPrice)) === Number(text)) verified += 1;
             seen[sku.toLowerCase()] = true;
             updated += 1;
           }
@@ -426,7 +451,7 @@ public partial class Smt7ProductPageWindow : Window
           for (const key of Object.keys(map)) {
             if (!seen[key.toLowerCase()]) missed.push(key);
           }
-          return { updated: updated, missed: missed };
+          return { updated: updated, verified: verified, missed: missed };
         })();
         """;
 }
@@ -434,6 +459,8 @@ public partial class Smt7ProductPageWindow : Window
 public sealed class Smt7PageWriteResult
 {
     public int Updated { get; init; }
+    /// <summary>写入后回读确认与目标值一致的条数。</summary>
+    public int Verified { get; init; }
     public List<string> MissedPageSkus { get; init; } = [];
     public string? Error { get; init; }
 }
