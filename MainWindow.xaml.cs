@@ -7,12 +7,14 @@
  *   2026-09-05 增加 JOOM 页签，店小秘命中结果可导入并计算
  *   2026-09-05 JOOM 产品详情页读取变种 SKU 并回写价格
  *   2026-09-13 增加速卖通7 页签，对齐全托2.0 公式并回写供货价
+ *   2026-10-02 现代化主框架、标签入场动画与状态反馈
  */
 
 using System.Windows;
 using System.Windows.Input;
 using EcommerceWorkbench.Models;
 using EcommerceWorkbench.Services;
+using EcommerceWorkbench.UI;
 
 namespace EcommerceWorkbench;
 
@@ -69,10 +71,7 @@ public partial class MainWindow : Window
     {
         if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null)
             return;
-        SearchView.Visibility = Visibility.Visible;
-        PricingView.Visibility = Visibility.Collapsed;
-        JoomView.Visibility = Visibility.Collapsed;
-        Smt7View.Visibility = Visibility.Collapsed;
+        ShowView(SearchView, animate: false);
         ShortcutHint.Text = "F5 计算 | Ctrl+E 导出";
     }
 
@@ -80,10 +79,7 @@ public partial class MainWindow : Window
     {
         if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null)
             return;
-        SearchView.Visibility = Visibility.Collapsed;
-        PricingView.Visibility = Visibility.Visible;
-        JoomView.Visibility = Visibility.Collapsed;
-        Smt7View.Visibility = Visibility.Collapsed;
+        ShowView(PricingView);
         ShortcutHint.Text = "F5 计算 | Ctrl+E 导出";
     }
 
@@ -91,10 +87,7 @@ public partial class MainWindow : Window
     {
         if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null)
             return;
-        SearchView.Visibility = Visibility.Collapsed;
-        PricingView.Visibility = Visibility.Collapsed;
-        JoomView.Visibility = Visibility.Visible;
-        Smt7View.Visibility = Visibility.Collapsed;
+        ShowView(JoomView);
         ShortcutHint.Text = "F5 计算";
         JoomView.RefreshCount();
     }
@@ -103,12 +96,20 @@ public partial class MainWindow : Window
     {
         if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null)
             return;
-        SearchView.Visibility = Visibility.Collapsed;
-        PricingView.Visibility = Visibility.Collapsed;
-        JoomView.Visibility = Visibility.Collapsed;
-        Smt7View.Visibility = Visibility.Visible;
+        ShowView(Smt7View);
         ShortcutHint.Text = "F5 计算";
         Smt7View.RefreshCount();
+    }
+
+    private void ShowView(FrameworkElement target, bool animate = true)
+    {
+        SearchView.Visibility = ReferenceEquals(target, SearchView) ? Visibility.Visible : Visibility.Collapsed;
+        PricingView.Visibility = ReferenceEquals(target, PricingView) ? Visibility.Visible : Visibility.Collapsed;
+        JoomView.Visibility = ReferenceEquals(target, JoomView) ? Visibility.Visible : Visibility.Collapsed;
+        Smt7View.Visibility = ReferenceEquals(target, Smt7View) ? Visibility.Visible : Visibility.Collapsed;
+
+        if (animate)
+            TransitionHelper.Reveal(target);
     }
 
     private void OnImportToPricing(object? sender, IReadOnlyList<ProductResultRow> hits)
@@ -151,5 +152,6 @@ public partial class MainWindow : Window
     private void SetStatus(string message)
     {
         StatusText.Text = message;
+        TransitionHelper.Acknowledge(StatusText);
     }
 }

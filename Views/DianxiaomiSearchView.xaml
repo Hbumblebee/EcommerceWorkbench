@@ -8,25 +8,21 @@
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
-                Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="12"
-                Margin="0,0,0,10">
+                Style="{StaticResource CardStyle}"
+                CornerRadius="0"
+                BorderThickness="0,0,0,1"
+                Padding="18,12">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Left"
-                           Text="店小秘登录与 Cookie"
-                           FontSize="15"
-                           FontWeight="SemiBold"
-                           Foreground="{StaticResource TextBrush}"
+                           Text="店小秘连接"
+                           Style="{StaticResource SectionTitleStyle}"
                            VerticalAlignment="Center"
                            Margin="0,0,16,0"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <WrapPanel HorizontalAlignment="Right">
                     <Button x:Name="ToggleBrowserButton"
                             Content="隐藏浏览器"
                             Click="ToggleBrowser_Click"
-                            Background="#0F766E"
+                            Background="{StaticResource OkGreenBrush}"
                             IsEnabled="False"/>
                     <Button x:Name="OpenLoginButton"
                             Content="打开登录页"
@@ -39,8 +35,8 @@
                             Content="保存到本地"
                             Click="SaveCookies_Click"/>
                     <Button Content="加载本地" Click="LoadCookies_Click"/>
-                    <Button Content="清空会话" Click="ClearSession_Click" Background="#6B7280" Margin="0"/>
-                </StackPanel>
+                    <Button Content="清空会话" Click="ClearSession_Click" Style="{StaticResource GhostButton}" Margin="0"/>
+                </WrapPanel>
             </DockPanel>
         </Border>
 
@@ -57,8 +53,8 @@
                     Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="1"
-                    CornerRadius="6"
-                    Padding="8">
+                    CornerRadius="10"
+                    Padding="12">
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top"
                                Text="1. 登录专用浏览器（仅用于输入账号密码与验证码）"
@@ -80,8 +76,8 @@
                     Background="{StaticResource PanelBrush}"
                     BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="1"
-                    CornerRadius="6"
-                    Padding="12">
+                    CornerRadius="10"
+                    Padding="14">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -114,8 +110,7 @@
                         <DockPanel Grid.Column="0">
                             <TextBlock DockPanel.Dock="Top"
                                        Text="商品搜索"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextBrush}"
+                                       Style="{StaticResource SectionTitleStyle}"
                                        Margin="0,0,0,6"/>
                             <TextBlock DockPanel.Dock="Top"
                                        Text="逗号/换行分隔；单次最多 200 个，只发一次请求；命中按输入顺序展示"
@@ -142,8 +137,7 @@
                         <DockPanel Grid.Column="2">
                             <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                                 <TextBlock Text="命中结果"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource TextBrush}"
+                                           Style="{StaticResource SectionTitleStyle}"
                                            VerticalAlignment="Center"/>
                                 <TextBlock x:Name="HitCountText"
                                            Margin="10,0,0,0"
@@ -156,19 +150,19 @@
                                             Margin="0,0,6,0"
                                             Click="ImportToPricing_Click"/>
                                     <Button Content="JOOM计算"
-                                            Background="#0F766E"
+                                            Background="{StaticResource OkGreenBrush}"
                                             Margin="0,0,6,0"
                                             Click="ImportToJoom_Click"/>
                                     <Button Content="速卖通7计算"
-                                            Background="#0F766E"
+                                            Background="{StaticResource OkGreenBrush}"
                                             Margin="0,0,6,0"
                                             Click="ImportToSmt7_Click"/>
                                     <Button Content="复制SKU和价格"
-                                            Background="#3B82F6"
+                                            Background="{StaticResource AccentBrush}"
                                             Margin="0,0,6,0"
                                             Click="CopySkuPrice_Click"/>
                                     <Button Content="复制SKU、价格和重量"
-                                            Background="#2563EB"
+                                            Background="{StaticResource AccentBrush}"
                                             Margin="0"
                                             Click="CopySkuPriceWeight_Click"/>
                                 </WrapPanel>
@@ -182,7 +176,6 @@
                                       CanUserSortColumns="False"
                                       HeadersVisibility="Column"
                                       GridLinesVisibility="Horizontal"
-                                      AlternatingRowBackground="#F8FAFC"
                                       BorderBrush="{StaticResource BorderBrush}"
                                       BorderThickness="1"
                                       RowHeight="32"
@@ -230,17 +223,16 @@
                         <DockPanel Grid.Column="4">
                             <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
                                 <TextBlock Text="未命中 SKU"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource TextBrush}"
+                                           Style="{StaticResource SectionTitleStyle}"
                                            VerticalAlignment="Center"/>
                                 <TextBlock x:Name="MissCountText"
                                            Margin="10,0,0,0"
                                            VerticalAlignment="Center"
-                                           Foreground="#B45309"
+                                           Foreground="{StaticResource WarnAmberBrush}"
                                            Text="0 个"/>
                                 <Button DockPanel.Dock="Right"
                                         Content="复制未命中"
-                                        Background="#B45309"
+                                        Background="{StaticResource WarnAmberBrush}"
                                         Margin="0"
                                         Click="CopyMissedSkus_Click"/>
                             </DockPanel>

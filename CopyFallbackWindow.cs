@@ -2,10 +2,12 @@
  * 功能说明：剪贴板被占用时的备用复制窗口，文本已选中便于 Ctrl+C。
  * 创建日期：2026-07-23
  * 修改记录：2026-08-14 迁入 EcommerceWorkbench
+ *           2026-10-02 统一现代化工作台视觉
  */
 
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using EcommerceWorkbench.Services;
 
 namespace EcommerceWorkbench;
@@ -18,17 +20,22 @@ public sealed class CopyFallbackWindow : Window
     public CopyFallbackWindow(string text)
     {
         Title = "手动复制 SKU 和价格";
-        Width = 520;
-        Height = 420;
+        Width = 620;
+        Height = 460;
+        MinWidth = 480;
+        MinHeight = 340;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = System.Windows.Media.Brushes.White;
+        Background = (Brush)FindResource("BgBrush");
+        FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI");
 
-        var root = new DockPanel { Margin = new Thickness(12) };
+        var root = new DockPanel { Margin = new Thickness(18) };
         var tip = new TextBlock
         {
             Text = "系统剪贴板正被占用。下面内容已全选，请按 Ctrl+C 复制后关闭窗口。",
             TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 0, 10)
+            Foreground = (Brush)FindResource("MutedBrush"),
+            FontSize = 13,
+            Margin = new Thickness(0, 0, 0, 12)
         };
         DockPanel.SetDock(tip, Dock.Top);
 
@@ -36,7 +43,7 @@ public sealed class CopyFallbackWindow : Window
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 10, 0, 0)
+            Margin = new Thickness(0, 12, 0, 0)
         };
         DockPanel.SetDock(buttons, Dock.Bottom);
 
@@ -47,11 +54,14 @@ public sealed class CopyFallbackWindow : Window
             TextWrapping = TextWrapping.NoWrap,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
-            IsReadOnly = true
+            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+            FontSize = 13,
+            Padding = new Thickness(10),
+            IsReadOnly = true,
+            Background = (Brush)FindResource("PanelBrush")
         };
 
-        var retry = new Button { Content = "再试自动复制", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(0, 0, 8, 0) };
+        var retry = new Button { Content = "再试自动复制", Margin = new Thickness(0, 0, 8, 0) };
         retry.Click += (_, _) =>
         {
             if (ClipboardHelper.TrySetText(box.Text, this))
@@ -67,7 +77,13 @@ public sealed class CopyFallbackWindow : Window
             }
         };
 
-        var close = new Button { Content = "关闭", Padding = new Thickness(12, 6, 12, 6), IsCancel = true };
+        var close = new Button
+        {
+            Content = "关闭",
+            IsCancel = true,
+            Style = (Style)FindResource("GhostButton"),
+            Margin = new Thickness(0)
+        };
         close.Click += (_, _) => Close();
 
         buttons.Children.Add(retry);

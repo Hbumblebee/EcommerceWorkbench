@@ -7,6 +7,8 @@
         Width="1280"
         MinHeight="560"
         MinWidth="900"
+        Background="{StaticResource BgBrush}"
+        FontFamily="Segoe UI, Microsoft YaHei UI"
         WindowStartupLocation="CenterScreen">
     <Grid>
         <Grid.RowDefinitions>
@@ -14,14 +16,23 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <Border Grid.Row="0"
-                Background="#F8FAFC"
-                BorderBrush="#D7DEE8"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="12,8">
-            <TextBlock x:Name="HintText"
-                       TextWrapping="Wrap"
-                       Foreground="#5B6B7C"
-                       Text="正在打开店小秘速卖通全托管产品详情页。定价完成后将把最终价写入【变种信息】的供货价，请再在页面上点保存/发布。"/>
+                Padding="16,12">
+            <DockPanel>
+                <Border DockPanel.Dock="Left"
+                        Width="8"
+                        Height="8"
+                        CornerRadius="4"
+                        Background="{StaticResource AccentBrush}"
+                        Margin="0,0,10,0"/>
+                <TextBlock x:Name="HintText"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource MutedBrush}"
+                           Text="正在打开店小秘速卖通全托管产品详情页。定价完成后将把最终价写入【变种信息】的供货价，请再在页面上点保存/发布。"/>
+            </DockPanel>
         </Border>
         <wv2:WebView2 x:Name="Browser" Grid.Row="1"/>
     </Grid>

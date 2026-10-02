@@ -70,12 +70,10 @@
                 BorderThickness="0,0,0,1"
                 Padding="16,12">
             <StackPanel>
-                <TextBlock Text="跨境商品定价 · 批量计算"
-                           FontSize="18"
-                           FontWeight="Bold"
-                           Foreground="{StaticResource TextBrush}"/>
+                <TextBlock Text="Shopee 批量定价"
+                           Style="{StaticResource PageTitleStyle}"/>
                 <TextBlock Text="填写 SKU（唯一键）、成本价、重量 · 默认净利润率变更后同步计算售价"
-                           Foreground="{StaticResource MutedBrush}"
+                           Style="{StaticResource PageDescriptionStyle}"
                            Margin="0,4,0,8"/>
                 <WrapPanel x:Name="TagPanel" Margin="0,0,0,4"/>
                 <TextBlock x:Name="RateSourceText"
@@ -88,7 +86,7 @@
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1"
-                CornerRadius="6"
+                CornerRadius="10"
                 Padding="14,10"
                 Margin="0,10,0,8">
             <StackPanel>
@@ -96,7 +94,7 @@
                            Foreground="{StaticResource MutedBrush}"
                            Margin="0,0,0,8"/>
                 <WrapPanel>
-                    <Border Background="#FFF3E0" Padding="10,8" Margin="0,0,14,8" CornerRadius="4">
+                    <Border Background="{StaticResource AccentSoftBrush}" Padding="12,10" Margin="0,0,14,8" CornerRadius="8">
                         <StackPanel>
                             <TextBlock Text="汇率 CNY→TWD（手动维护）"
                                        FontWeight="Bold"
@@ -128,7 +126,7 @@
                         <TextBlock Text="提现手续费 %" Style="{StaticResource ParamLabel}"/>
                         <TextBox x:Name="WithdrawBox" Style="{StaticResource ParamBox}" Text="1" LostFocus="Param_LostFocus"/>
                     </StackPanel>
-                    <Border Background="#FFF8E6" Padding="10,8" Margin="0,0,14,8" CornerRadius="4">
+                    <Border Background="{StaticResource InputBgBrush}" Padding="12,10" Margin="0,0,14,8" CornerRadius="8">
                         <StackPanel>
                             <TextBlock Text="默认预期净利润率 %" FontWeight="Bold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,6"/>
                             <TextBox x:Name="DefaultProfitRateBox" Width="110" HorizontalContentAlignment="Right"
@@ -163,7 +161,7 @@
                 Background="{StaticResource PanelBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1"
-                CornerRadius="6">
+                CornerRadius="10">
             <DataGrid x:Name="PricingGrid"
                       AutoGenerateColumns="False"
                       CanUserAddRows="False"

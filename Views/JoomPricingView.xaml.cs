@@ -12,6 +12,9 @@
  *           2026-09-28 SKU 占用改为检查全部店铺
  *           2026-09-29 产品重复时按通用/颜色后缀生成可修改的新 SKU
  *           2026-09-29 内容超出窗口时整页可滚动，定价表仍占用剩余高度
+ *           2026-10-02 整页可滚动；重复提示至少露出 3 条，定价表至少露出 10 行
+ *           2026-10-02 嵌套滚动区到达边界后自动把滚轮交给整页
+ *           2026-10-02 整页、重复区与表格统一采用短距离缓动滚动
  */
 
 using System.Collections.ObjectModel;
@@ -22,10 +25,13 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
 using EcommerceWorkbench.Models;
 using EcommerceWorkbench.Services;
 using EcommerceWorkbench.Services.Dianxiaomi;
 using EcommerceWorkbench.Services.Joom;
+using EcommerceWorkbench.UI;
 
 namespace EcommerceWorkbench.Views;
 
@@ -67,6 +73,43 @@ public partial class JoomPricingView : UserControl
         Loaded += JoomPricingView_Loaded;
     }
 
+    /// <summary>
+    /// 统一接管滚轮：优先滚动鼠标所在的重复区或表格，到边界后平滑交给整页。
+    /// </summary>
+    private void PageScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        ScrollViewer target = PageScroll;
+        if (OccupancyScroll.IsMouseOver && SmoothScrollHelper.CanScroll(OccupancyScroll, e.Delta))
+        {
+            target = OccupancyScroll;
+        }
+        else if (PricingGrid.IsMouseOver)
+        {
+            var gridScroll = FindVisualChild<ScrollViewer>(PricingGrid, "DG_ScrollViewer");
+            if (gridScroll is not null && SmoothScrollHelper.CanScroll(gridScroll, e.Delta))
+                target = gridScroll;
+        }
+
+        SmoothScrollHelper.ScrollWheel(target, e.Delta);
+        e.Handled = true;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match && (name.Length == 0 || match.Name == name))
+                return match;
+
+            var nested = FindVisualChild<T>(child, name);
+            if (nested is not null)
+                return nested;
+        }
+
+        return null;
+    }
+
     public void Cleanup()
     {
         try
@@ -105,35 +148,6 @@ public partial class JoomPricingView : UserControl
         GeneralSuffixBox.Text = _settings.GeneralSkuSuffixes ?? JoomUserSettings.DefaultGeneralSkuSuffixes;
         ColorSuffixBox.Text = _settings.ColorSkuSuffixes ?? JoomUserSettings.DefaultColorSkuSuffixes;
         SeedEmptyRows(12);
-        Dispatcher.BeginInvoke(UpdatePageLayout, System.Windows.Threading.DispatcherPriority.Loaded);
-    }
-
-    private void JoomPricingView_SizeChanged(object sender, SizeChangedEventArgs e) => UpdatePageLayout();
-
-    private void TopPanel_SizeChanged(object sender, SizeChangedEventArgs e) => UpdatePageLayout();
-
-    /// <summary>
-    /// 上方内容增高时压低定价表，但至少留出一块可滚动的表格；仍放不下时整页出现滚动条。
-    /// </summary>
-    private void UpdatePageLayout()
-    {
-        if (!IsLoaded || PageScroll is null || TopPanel is null || FooterHint is null || GridHost is null)
-            return;
-
-        var viewport = PageScroll.ActualHeight;
-        if (viewport <= 1 || double.IsNaN(viewport))
-            return;
-
-        var footer = FooterHint.ActualHeight + FooterHint.Margin.Top + FooterHint.Margin.Bottom;
-        var gridChrome = GridHost.Margin.Top + GridHost.Margin.Bottom;
-        var gridHeight = viewport - TopPanel.ActualHeight - footer - gridChrome - 4;
-        if (gridHeight < 220)
-            gridHeight = 220;
-
-        if (!double.IsNaN(PricingGrid.Height) && Math.Abs(PricingGrid.Height - gridHeight) < 1)
-            return;
-
-        PricingGrid.Height = gridHeight;
     }
 
     /// <summary>
