@@ -7,6 +7,7 @@
  *           2026-09-28 占用结果带上店铺名称
  *           2026-09-28 SKU 占用改为检查全部店铺
  *           2026-10-02 支持以 + 分隔的组合 SKU 逐项精确检查
+ *           2026-10-03 占用检查按 SKU 分批搜索；失败位置与「未核对原因」分开报告，不再伪装成位置名
  */
 
 using System.Collections.Concurrent;
@@ -21,9 +22,7 @@ public sealed class JoomProductDetail
 {
     public string Id { get; init; } = "";
     public string EditUrl { get; init; } = "";
-    public int? State { get; init; }
     public string? Name { get; init; }
-    public string? ShopId { get; init; }
     public List<JoomVariantSkuGroup> UniqueSkus { get; init; } = [];
 }
 
@@ -42,7 +41,10 @@ public sealed class JoomSkuOccupancy
 public sealed class JoomSkuOccupancyReport
 {
     public List<JoomSkuOccupancy> Hits { get; init; } = [];
+    /// <summary>因网络/接口错误未完成核对的位置名。</summary>
     public List<string> FailedLocations { get; init; } = [];
+    /// <summary>部分内容未完成核对的原因（如详情核对预算用尽、结果超过分页上限），不混入 FailedLocations。</summary>
+    public List<string> IncompleteReasons { get; init; } = [];
 }
 
 public sealed class JoomVariantSkuGroup
@@ -58,7 +60,9 @@ public sealed class JoomProductService
     public const string UserInfoUrl = "https://www.dianxiaomi.com/api/userIn.json";
     private const int PageSize = 100;
     private const int MaxPagesPerLocation = 5;
-    private const int EditFallbackBudget = 40;
+    private const int EditFallbackBudget = 60;
+    /// <summary>占用检查按此数量分批搜索，避免单个 searchValue 过大触发后端截断。</summary>
+    private const int OccupancySearchBatchSize = 20;
 
     private readonly ApiClient _apiClient;
 
@@ -146,9 +150,7 @@ public sealed class JoomProductService
         {
             Id = productId,
             EditUrl = editUrl,
-            State = GetInt(product, "state"),
             Name = GetString(product, "name"),
-            ShopId = NormalizeShopId(GetString(product, "shopId")),
             UniqueSkus = unique
         };
     }
@@ -178,28 +180,44 @@ public sealed class JoomProductService
         if (wanted.Count == 0)
             return new JoomSkuOccupancyReport();
 
-        var searchValue = string.Join(",", wanted.Keys);
         var shopNames = await LoadShopNamesAsync(cookieHeader, cancellationToken);
         var currentId = (currentProductId ?? "").Trim();
         var hits = new ConcurrentBag<JoomSkuOccupancy>();
         var failures = new ConcurrentBag<string>();
         var completed = new ConcurrentBag<string>();
         var seen = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        var incomplete = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
         var editBudget = EditFallbackBudget;
 
-        var tasks = Locations.Select(location => ScanLocationAsync(
-            location,
-            searchValue,
-            shopNames,
-            currentId,
-            wanted,
-            cookieHeader,
-            hits,
-            failures,
-            completed,
-            seen,
-            () => Interlocked.Decrement(ref editBudget) >= 0,
-            cancellationToken));
+        // 按固定大小分批搜索：单个 searchValue 过大时后端可能截断结果，分批后每批的结果集更小、
+        // 更容易落在分页上限内；批次内排序保证请求内容可复现。
+        var batches = wanted.Keys
+            .OrderBy(k => k, StringComparer.Ordinal)
+            .Chunk(OccupancySearchBatchSize)
+            .Select(chunk => string.Join(",", chunk))
+            .ToList();
+
+        var tasks = new List<Task>(batches.Count * Locations.Length);
+        foreach (var searchValue in batches)
+        {
+            foreach (var location in Locations)
+            {
+                tasks.Add(ScanLocationAsync(
+                    location,
+                    searchValue,
+                    shopNames,
+                    currentId,
+                    wanted,
+                    cookieHeader,
+                    hits,
+                    failures,
+                    completed,
+                    seen,
+                    incomplete,
+                    () => Interlocked.Decrement(ref editBudget) >= 0,
+                    cancellationToken));
+            }
+        }
 
         try
         {
@@ -207,13 +225,16 @@ public sealed class JoomProductService
         }
         catch (Exception ex)
         {
-            var auth = Flatten(ex).FirstOrDefault(e => IsAuthFailure(e.Message));
+            var auth = Flatten(ex).FirstOrDefault(e => CookieErrorDetector.IsAuthFailure(e.Message));
             if (auth is not null)
                 throw auth;
         }
 
         var failedLocations = failures
             .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToList();
+        var incompleteReasons = incomplete.Keys
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToList();
         if (hits.IsEmpty && completed.IsEmpty && failedLocations.Count > 0)
@@ -229,7 +250,8 @@ public sealed class JoomProductService
         return new JoomSkuOccupancyReport
         {
             Hits = ordered,
-            FailedLocations = failedLocations
+            FailedLocations = failedLocations,
+            IncompleteReasons = incompleteReasons
         };
     }
 
@@ -244,12 +266,14 @@ public sealed class JoomProductService
         ConcurrentBag<string> failures,
         ConcurrentBag<string> completed,
         ConcurrentDictionary<string, byte> seen,
+        ConcurrentDictionary<string, byte> incomplete,
         Func<bool> tryConsumeEditFallback,
         CancellationToken cancellationToken)
     {
         try
         {
             var pageNo = 1;
+            var totalPage = 1;
             while (pageNo <= MaxPagesPerLocation)
             {
                 var body = BuildListBody(pageNo, searchValue, shopId: null, location.Extra);
@@ -277,7 +301,7 @@ public sealed class JoomProductService
                 if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
                     break;
 
-                if (!TryReadPage(data, out var list, out var totalPage))
+                if (!TryReadPage(data, out var list, out totalPage))
                     break;
 
                 foreach (var item in list.EnumerateArray())
@@ -298,7 +322,10 @@ public sealed class JoomProductService
                     {
                         if (!tryConsumeEditFallback())
                         {
-                            failures.Add("部分命中未核对");
+                            // 原实现把这句话塞进 failures，伪装成「位置」名并污染后续判断；
+                            // 现在单独归入 incomplete，语义与失败位置分开。
+                            incomplete.TryAdd(
+                                location.Label + "：部分商品未能核对详情（详情核对预算用尽）", 0);
                             continue;
                         }
 
@@ -337,9 +364,17 @@ public sealed class JoomProductService
                 pageNo++;
             }
 
+            // 分页上限截断：结果超过 MaxPagesPerLocation×PageSize 条时，超出部分没有核对过，
+            // 原实现静默当作「检查完成」，会给出「无占用」的假阴性。
+            if (pageNo > MaxPagesPerLocation && totalPage > MaxPagesPerLocation)
+            {
+                incomplete.TryAdd(
+                    location.Label + $"：结果超过 {MaxPagesPerLocation * PageSize} 条，超出部分未核对", 0);
+            }
+
             completed.Add(location.Label);
         }
-        catch (Exception ex) when (!IsAuthFailure(ex.Message))
+        catch (Exception ex) when (!CookieErrorDetector.IsAuthFailure(ex.Message))
         {
             failures.Add(location.Label);
         }
@@ -426,7 +461,7 @@ public sealed class JoomProductService
         {
             // 店铺名解析失败时，提示里退回「当前店铺」
         }
-        catch (Exception ex) when (!IsAuthFailure(ex.Message))
+        catch (Exception ex) when (!CookieErrorDetector.IsAuthFailure(ex.Message))
         {
             // 店铺列表失败不阻断 SKU 占用检查
         }
@@ -577,17 +612,6 @@ public sealed class JoomProductService
         }
 
         return "";
-    }
-
-    private static bool IsAuthFailure(string? message)
-    {
-        if (string.IsNullOrWhiteSpace(message))
-            return false;
-        return message.Contains("验证失败", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("code=2001", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("未登录", StringComparison.OrdinalIgnoreCase)
-               || (message.Contains("登录", StringComparison.OrdinalIgnoreCase)
-                   && message.Contains("失效", StringComparison.OrdinalIgnoreCase));
     }
 
     private static IEnumerable<Exception> Flatten(Exception ex)

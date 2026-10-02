@@ -149,7 +149,22 @@ public partial class JoomPricingView : UserControl
             ProductUrlBox.Text = _settings.ProductEditUrl;
         GeneralSuffixBox.Text = _settings.GeneralSkuSuffixes ?? JoomUserSettings.DefaultGeneralSkuSuffixes;
         ColorSuffixBox.Text = _settings.ColorSkuSuffixes ?? JoomUserSettings.DefaultColorSkuSuffixes;
+        ApplyDefaultParamsToBoxes();
         SeedEmptyRows(12);
+    }
+
+    /// <summary>
+    /// 分档参数从 JoomSettings 代码常量播种（单一来源），不再依赖 XAML 里硬编码的初值。
+    /// </summary>
+    private void ApplyDefaultParamsToBoxes()
+    {
+        RateBox.Text = JoomSettings.DefaultExchangeRate.ToString("0.####", CultureInfo.InvariantCulture);
+        LowCommissionBox.Text = JoomSettings.DefaultCommissionPercent.ToString("0.##", CultureInfo.InvariantCulture);
+        LowMarginBox.Text = JoomSettings.DefaultLowMarginPercent.ToString("0.##", CultureInfo.InvariantCulture);
+        MidCommissionBox.Text = JoomSettings.DefaultCommissionPercent.ToString("0.##", CultureInfo.InvariantCulture);
+        MidMarginBox.Text = JoomSettings.DefaultMidMarginPercent.ToString("0.##", CultureInfo.InvariantCulture);
+        HighCommissionBox.Text = JoomSettings.DefaultCommissionPercent.ToString("0.##", CultureInfo.InvariantCulture);
+        HighMarginBox.Text = JoomSettings.DefaultHighMarginPercent.ToString("0.##", CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -318,7 +333,7 @@ public partial class JoomPricingView : UserControl
             {
                 ClearOccupancy();
                 SetStatus(loaded + "占用检查失败：" + occupancyEx.Message);
-                if (IsCookieInvalidError(occupancyEx.Message))
+                if (CookieErrorDetector.IsAuthFailure(occupancyEx.Message))
                     CookieInvalidated?.Invoke(this, occupancyEx.Message);
             }
 
@@ -327,7 +342,7 @@ public partial class JoomPricingView : UserControl
         catch (Exception ex)
         {
             SetStatus($"打开产品详情失败：{ex.Message}");
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
             else
                 MessageBox.Show(ex.Message, "打开产品详情失败", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -377,7 +392,7 @@ public partial class JoomPricingView : UserControl
         catch (Exception ex)
         {
             SetStatus($"搜索定价失败：{ex.Message}");
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
             else
                 MessageBox.Show(ex.Message, "搜索定价失败", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -437,13 +452,20 @@ public partial class JoomPricingView : UserControl
             var missed = result.MissedPageSkus.Count == 0
                 ? ""
                 : $"；未匹配 {result.MissedPageSkus.Count} 个页面 SKU";
-            var hint = $"已写入 {result.Updated} 条变种的 MSRP 和价格{missed}。请在店小秘页面确认后点击保存/发布。";
+            var unverified = Math.Max(0, result.Updated - result.Verified);
+            var verifyNote = result.Updated > 0 && unverified > 0
+                ? $"；其中 {unverified} 条写入后未能回读确认，请人工核对"
+                : "";
+            var hint = $"已写入 {result.Updated} 条变种的 MSRP 和价格{missed}{verifyNote}。请在店小秘页面确认后点击保存/发布。";
             _productWindow.SetHint(hint);
             SetStatus(hint);
-            if (result.MissedPageSkus.Count > 0)
+            if (result.MissedPageSkus.Count > 0 || unverified > 0)
             {
+                var detail = hint;
+                if (result.MissedPageSkus.Count > 0)
+                    detail += "\n\n未匹配：" + string.Join("、", result.MissedPageSkus.Take(20));
                 MessageBox.Show(
-                    hint + "\n\n未匹配：" + string.Join("、", result.MissedPageSkus.Take(20)),
+                    detail,
                     "回写完成",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -656,14 +678,6 @@ public partial class JoomPricingView : UserControl
         return _cookieStore.Load(CookieStore.DefaultFilePath)?.Cookies;
     }
 
-    private static bool IsCookieInvalidError(string message)
-    {
-        return message.Contains("验证失败", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("code=2001", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("未登录", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("登录", StringComparison.OrdinalIgnoreCase) && message.Contains("失效", StringComparison.OrdinalIgnoreCase);
-    }
-
     private void Calc_Click(object sender, RoutedEventArgs e) => RecalculateAll();
 
     private void AddRow_Click(object sender, RoutedEventArgs e)
@@ -742,7 +756,7 @@ public partial class JoomPricingView : UserControl
         {
             ClearOccupancy();
             SetStatus($"SKU 占用检查失败：{ex.Message}");
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
             else
                 MessageBox.Show(ex.Message, "SKU 占用检查失败", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -811,7 +825,7 @@ public partial class JoomPricingView : UserControl
                         group.SuggestStatus = "查找可用后缀失败：" + ex.Message;
                 }
 
-                if (IsCookieInvalidError(ex.Message))
+                if (CookieErrorDetector.IsAuthFailure(ex.Message))
                     throw;
             }
         }
@@ -819,14 +833,22 @@ public partial class JoomPricingView : UserControl
         var failed = report.FailedLocations.Count == 0
             ? ""
             : " 以下范围未完整核对：" + string.Join("、", report.FailedLocations) + "。";
+        var incomplete = report.IncompleteReasons.Count == 0
+            ? ""
+            : " 以下内容未完整核对：" + string.Join("、", report.IncompleteReasons) + "。";
         if (_occupancies.Count == 0)
-            return "已检查 " + skus.Count + " 个 SKU，各店铺的采集箱、待发布、在线产品中没有其他占用。" + failed;
+        {
+            var claim = failed.Length == 0 && incomplete.Length == 0
+                ? "各店铺的采集箱、待发布、在线产品中没有其他占用。"
+                : "各店铺的采集箱、待发布、在线产品中未发现其他占用，但检查不完整，不能保证无重复。";
+            return "已检查 " + skus.Count + " 个 SKU，" + claim + failed + incomplete;
+        }
 
         var suggested = _occupancies.Count(g => !string.IsNullOrWhiteSpace(g.SuggestedSku));
         var suggestionNote = suggested == _occupancies.Count
             ? " 已在每个重复 SKU 后面填入未占用的新 SKU，可以直接修改。"
             : " 已填入 " + suggested + " 个未占用的新 SKU。未填入的可以启用颜色后缀、补充通用后缀，或手动填写。";
-        return "发现 " + report.Hits.Count + " 处 SKU 占用，发布前请先更换 SKU，或处理下面列出的产品。" + suggestionNote + failed;
+        return "发现 " + report.Hits.Count + " 处 SKU 占用，发布前请先更换 SKU，或处理下面列出的产品。" + suggestionNote + failed + incomplete;
     }
 
     private void ClearOccupancy()
@@ -980,10 +1002,11 @@ public partial class JoomPricingView : UserControl
                 return;
 
             var occupied = report.Hits.Any(hit => hit.Sku.Equals(sku, StringComparison.OrdinalIgnoreCase));
-            group.SuggestionAvailable = !occupied && report.FailedLocations.Count == 0;
+            var fullyChecked = report.FailedLocations.Count == 0 && report.IncompleteReasons.Count == 0;
+            group.SuggestionAvailable = !occupied && fullyChecked;
             group.SuggestStatus = occupied
                 ? "修改后的 SKU 仍会产品重复"
-                : group.SuggestionAvailable
+                : fullyChecked
                     ? "修改后的 SKU 未被占用"
                     : "部分范围未完成核对，暂不替换详情页";
             RefreshSuggestedSkuColumn();
@@ -993,7 +1016,7 @@ public partial class JoomPricingView : UserControl
             group.SuggestionAvailable = false;
             group.SuggestStatus = "确认失败：" + ex.Message;
             SetStatus("确认建议 SKU 失败：" + ex.Message);
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
         }
     }
@@ -1031,7 +1054,7 @@ public partial class JoomPricingView : UserControl
             }
 
             SetStatus("查找可用后缀失败：" + ex.Message);
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
         }
     }
@@ -1125,10 +1148,11 @@ public partial class JoomPricingView : UserControl
                         cookieHeader);
                     if (generation != _suggestGeneration)
                         return;
-                    if (report.FailedLocations.Count > 0)
+                    if (report.FailedLocations.Count > 0 || report.IncompleteReasons.Count > 0)
                     {
                         throw new InvalidOperationException(
-                            "候选 SKU 未完成全部范围核对：" + string.Join("、", report.FailedLocations));
+                            "候选 SKU 未完成全部范围核对："
+                            + string.Join("、", report.FailedLocations.Concat(report.IncompleteReasons)));
                     }
 
                     foreach (var hit in report.Hits)
@@ -1355,10 +1379,14 @@ public partial class JoomPricingView : UserControl
                 change.Row.AppliedPageSku = change.To;
 
             var action = restoreOriginal ? "恢复原 SKU" : "应用新 SKU";
-            var hint = $"已{action} {result.Updated} 条。请在店小秘页面确认后点击保存/发布。";
+            var unverified = Math.Max(0, result.Updated - result.Verified);
+            var verifyNote = result.Updated > 0 && unverified > 0
+                ? $"；其中 {unverified} 条写入后未能回读确认，请人工核对"
+                : "";
+            var hint = $"已{action} {result.Updated} 条{verifyNote}。请在店小秘页面确认后点击保存/发布。";
             _productWindow.SetHint(hint);
             SetStatus(hint);
-            if (!string.IsNullOrWhiteSpace(result.Error) || missed.Count > 0)
+            if (!string.IsNullOrWhiteSpace(result.Error) || missed.Count > 0 || unverified > 0)
             {
                 MessageBox.Show(
                     hint + (missed.Count == 0 ? "" : "\n\n未匹配：" + string.Join("、", missed.Take(20)))
@@ -1541,18 +1569,18 @@ public partial class JoomPricingView : UserControl
             ExchangeRate = ReadDouble(RateBox, JoomSettings.DefaultExchangeRate),
             Low = new JoomTierParams
             {
-                Commission = ReadPercent(LowCommissionBox, 15),
-                Margin = ReadPercent(LowMarginBox, 50)
+                Commission = ReadPercent(LowCommissionBox, JoomSettings.DefaultCommissionPercent),
+                Margin = ReadPercent(LowMarginBox, JoomSettings.DefaultLowMarginPercent)
             },
             Mid = new JoomTierParams
             {
-                Commission = ReadPercent(MidCommissionBox, 15),
-                Margin = ReadPercent(MidMarginBox, 45)
+                Commission = ReadPercent(MidCommissionBox, JoomSettings.DefaultCommissionPercent),
+                Margin = ReadPercent(MidMarginBox, JoomSettings.DefaultMidMarginPercent)
             },
             High = new JoomTierParams
             {
-                Commission = ReadPercent(HighCommissionBox, 15),
-                Margin = ReadPercent(HighMarginBox, 40)
+                Commission = ReadPercent(HighCommissionBox, JoomSettings.DefaultCommissionPercent),
+                Margin = ReadPercent(HighMarginBox, JoomSettings.DefaultHighMarginPercent)
             }
         };
     }

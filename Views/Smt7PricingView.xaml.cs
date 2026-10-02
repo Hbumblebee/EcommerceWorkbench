@@ -252,7 +252,7 @@ public partial class Smt7PricingView : UserControl
         catch (Exception ex)
         {
             SetStatus($"打开产品详情失败：{ex.Message}");
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
             else
                 MessageBox.Show(ex.Message, "打开产品详情失败", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -323,7 +323,7 @@ public partial class Smt7PricingView : UserControl
         catch (Exception ex)
         {
             SetStatus($"搜索定价失败：{ex.Message}");
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
             else
                 MessageBox.Show(ex.Message, "搜索定价失败", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -383,13 +383,20 @@ public partial class Smt7PricingView : UserControl
             var missed = result.MissedPageSkus.Count == 0
                 ? ""
                 : $"；未匹配 {result.MissedPageSkus.Count} 个页面 SKU";
-            var hint = $"已写入 {result.Updated} 条变种的供货价{missed}。请在店小秘页面确认后点击保存/发布。";
+            var unverified = Math.Max(0, result.Updated - result.Verified);
+            var verifyNote = result.Updated > 0 && unverified > 0
+                ? $"；其中 {unverified} 条写入后未能回读确认，请人工核对"
+                : "";
+            var hint = $"已写入 {result.Updated} 条变种的供货价{missed}{verifyNote}。请在店小秘页面确认后点击保存/发布。";
             _productWindow.SetHint(hint);
             SetStatus(hint);
-            if (result.MissedPageSkus.Count > 0)
+            if (result.MissedPageSkus.Count > 0 || unverified > 0)
             {
+                var detail = hint;
+                if (result.MissedPageSkus.Count > 0)
+                    detail += "\n\n未匹配：" + string.Join("、", result.MissedPageSkus.Take(20));
                 MessageBox.Show(
-                    hint + "\n\n未匹配：" + string.Join("、", result.MissedPageSkus.Take(20)),
+                    detail,
                     "回写完成",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -398,7 +405,7 @@ public partial class Smt7PricingView : UserControl
         catch (Exception ex)
         {
             SetStatus($"回写失败：{ex.Message}");
-            if (IsCookieInvalidError(ex.Message))
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
             else
                 MessageBox.Show(ex.Message, "回写失败", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -563,14 +570,6 @@ public partial class Smt7PricingView : UserControl
             return live;
 
         return _cookieStore.Load(CookieStore.DefaultFilePath)?.Cookies;
-    }
-
-    private static bool IsCookieInvalidError(string message)
-    {
-        return message.Contains("验证失败", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("code=2001", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("未登录", StringComparison.OrdinalIgnoreCase)
-               || message.Contains("登录", StringComparison.OrdinalIgnoreCase) && message.Contains("失效", StringComparison.OrdinalIgnoreCase);
     }
 
     private void Calc_Click(object sender, RoutedEventArgs e) => RecalculateAll();
