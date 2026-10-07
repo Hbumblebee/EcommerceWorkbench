@@ -3,6 +3,7 @@
  * 主要职责：打开速卖通全托管详情页读取变种 SKU，搜索参考价/重量后计算最终价，并回写供货价。
  * 创建日期：2026-09-13
  * 更新日期：2026-09-13 重量按货品条码匹配货品信息，搜索只填成本
+ *           2026-10-07 「搜索SKU」只去末尾通用后缀、保留颜色后缀（与 JOOM 页口径一致）
  */
 
 using System.Collections.ObjectModel;
@@ -13,6 +14,7 @@ using System.Windows.Controls;
 using EcommerceWorkbench.Models;
 using EcommerceWorkbench.Services;
 using EcommerceWorkbench.Services.Dianxiaomi;
+using EcommerceWorkbench.Services.Joom;
 using EcommerceWorkbench.Services.Smt7;
 
 namespace EcommerceWorkbench.Views;
@@ -76,6 +78,9 @@ public partial class Smt7PricingView : UserControl
         _loaded = true;
         if (!string.IsNullOrWhiteSpace(_settings.ProductEditUrl))
             ProductUrlBox.Text = _settings.ProductEditUrl;
+        SuffixBox.Text = string.IsNullOrWhiteSpace(_settings.GeneralSkuSuffixes)
+            ? Smt7UserSettings.DefaultGeneralSkuSuffixes
+            : _settings.GeneralSkuSuffixes;
         ApplyParamsToBoxes(_settings.ToCalcSettings());
         SeedEmptyRows(12);
     }
@@ -207,6 +212,22 @@ public partial class Smt7PricingView : UserControl
     public void RefreshCount() => UpdateCount();
 
     private void ProductUrlBox_LostFocus(object sender, RoutedEventArgs e) => PersistProductUrl();
+
+    private void SuffixBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var raw = SuffixBox.Text ?? "";
+        if (raw == _settings.GeneralSkuSuffixes)
+            return;
+        _settings.GeneralSkuSuffixes = raw;
+        try
+        {
+            _settings.Save();
+        }
+        catch
+        {
+            // 本地保存失败不阻断操作
+        }
+    }
 
     private async void OpenProduct_Click(object sender, RoutedEventArgs e)
     {
@@ -447,6 +468,9 @@ public partial class Smt7PricingView : UserControl
         _suppressAutoCalc = true;
         try
         {
+            // 「搜索SKU」只去掉末尾通用后缀、保留颜色后缀：店小秘商品库里的货号带颜色
+            // （4xJ0202-grey、J0242-purple），去掉颜色就查不到参考价。
+            var generalSuffixes = JoomSkuSuffix.Parse(SuffixBox.Text);
             _rows.Clear();
             foreach (var group in uniqueSkus)
             {
@@ -454,7 +478,7 @@ public partial class Smt7PricingView : UserControl
                 _rows.Add(new Smt7Row
                 {
                     PageSku = group.PageSku,
-                    Sku = group.PageSku,
+                    Sku = JoomSkuSuffix.StripCompositeTrailingSuffix(group.PageSku, generalSuffixes),
                     Weight = kg is null ? null : Math.Round(kg.Value * 1000.0, 4, MidpointRounding.AwayFromZero),
                     ConvertedWeight = kg is null ? null : FormatKg(kg.Value)
                 });

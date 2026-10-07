@@ -272,6 +272,21 @@
                              VerticalContentAlignment="Center"
                              LostFocus="ProductUrlBox_LostFocus"/>
                 </DockPanel>
+                <DockPanel Margin="0,0,0,4">
+                    <TextBlock DockPanel.Dock="Left"
+                               Text="搜索SKU 去掉的后缀"
+                               VerticalAlignment="Center"
+                               Margin="0,0,10,0"
+                               Foreground="{StaticResource TextBrush}"/>
+                    <TextBox x:Name="SuffixBox"
+                             VerticalContentAlignment="Center"
+                             ToolTip="中英文逗号分隔。打开详情页时，按这里的后缀去掉「搜索SKU」末尾的那一段，颜色后缀会保留"
+                             LostFocus="SuffixBox_LostFocus"/>
+                </DockPanel>
+                <TextBlock Text="打开详情页后「搜索SKU」自动去掉末尾通用后缀，颜色后缀保留（如 4xJ0202-grey-001 → 4xJ0202-grey），因为店小秘商品库里的货号是带颜色的。"
+                           Foreground="{StaticResource MutedBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,8"/>
                 <WrapPanel>
                     <Button Content="打开速卖通产品详情页"
                             Style="{StaticResource OrangeButton}"

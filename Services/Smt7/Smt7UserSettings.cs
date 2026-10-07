@@ -1,10 +1,12 @@
 /*
- * 功能说明：速卖通7 页本地设置（产品详情链接与全托2.0 分档参数）。
+ * 功能说明：速卖通7 页本地设置（产品详情链接、通用 SKU 后缀与全托2.0 分档参数）。
  * 创建日期：2026-09-13
  * 更新日期：2026-09-13 持久化成本/重量分档参数
+ *           2026-10-07 增加通用 SKU 后缀：打开详情后「搜索SKU」只去末尾通用后缀、保留颜色
  */
 using System.IO;
 using System.Text.Json;
+using EcommerceWorkbench.Services.Joom;
 
 namespace EcommerceWorkbench.Services.Smt7;
 
@@ -15,9 +17,18 @@ public sealed class Smt7UserSettings
         WriteIndented = true
     };
 
+    /// <summary>
+    /// 「搜索SKU」要自动去掉的末尾后缀；与 JOOM 页共用同一份默认值
+    /// （两个平台的货号后缀规则一致，商品库里的货号同样带颜色）。
+    /// </summary>
+    public const string DefaultGeneralSkuSuffixes = JoomUserSettings.DefaultGeneralSkuSuffixes;
+
     public string ProductEditUrl { get; set; } = "";
     public List<Smt7CostTier> CostTiers { get; set; } = [];
     public List<Smt7WeightTier> WeightTiers { get; set; } = [];
+
+    /// <summary>中英文逗号分隔；打开详情页生成「搜索SKU」时去掉这些末尾后缀。</summary>
+    public string GeneralSkuSuffixes { get; set; } = DefaultGeneralSkuSuffixes;
 
     public static string GetFilePath() => Path.Combine(AppPaths.DataDirectory, "smt7-settings.json");
 
