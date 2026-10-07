@@ -366,24 +366,67 @@
                                                               Margin="0,0,8,4"
                                                               Checked="UseColorSuffix_Changed"
                                                               Unchecked="UseColorSuffix_Changed"/>
-                                                    <ComboBox ItemsSource="{Binding ColorOptions}"
-                                                              SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
-                                                              MinWidth="120"
-                                                              Margin="0,0,0,4"
-                                                              ToolTip="选择后按「基础SKU + 颜色后缀 + 通用后缀」查找，例如 E0032-red-1"
-                                                              SelectionChanged="ColorSuffixCombo_SelectionChanged">
-                                                        <ComboBox.Style>
-                                                            <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                    <TextBlock Text="（组合 SKU 每一段各选一个颜色，按原顺序拼回）"
+                                                               Foreground="#9A3412"
+                                                               FontSize="11"
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,0,4">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
                                                                 <Setter Property="Visibility" Value="Collapsed"/>
                                                                 <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding UseColorSuffix}" Value="True">
+                                                                    <MultiDataTrigger>
+                                                                        <MultiDataTrigger.Conditions>
+                                                                            <Condition Binding="{Binding UseColorSuffix}" Value="True"/>
+                                                                            <Condition Binding="{Binding HasMultipleParts}" Value="True"/>
+                                                                        </MultiDataTrigger.Conditions>
                                                                         <Setter Property="Visibility" Value="Visible"/>
-                                                                    </DataTrigger>
+                                                                    </MultiDataTrigger>
                                                                 </Style.Triggers>
                                                             </Style>
-                                                        </ComboBox.Style>
-                                                    </ComboBox>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
                                                 </WrapPanel>
+                                                <ItemsControl ItemsSource="{Binding Parts}">
+                                                    <ItemsControl.Style>
+                                                        <Style TargetType="ItemsControl">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding UseColorSuffix}" Value="True">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </ItemsControl.Style>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <WrapPanel VerticalAlignment="Center" Margin="0,0,0,4">
+                                                                <TextBlock Text="{Binding Label}"
+                                                                           Foreground="#7F1D1D"
+                                                                           VerticalAlignment="Center"
+                                                                           Margin="0,0,6,0"
+                                                                           ToolTip="该段基础货号：会与所选颜色、通用后缀拼成这一段"/>
+                                                                <ComboBox ItemsSource="{Binding Owner.ColorOptions}"
+                                                                          SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
+                                                                          MinWidth="120"
+                                                                          Margin="0,0,8,0"
+                                                                          ToolTip="为该段选择颜色后缀；各段拼接后按原组合顺序组成新 SKU"
+                                                                          SelectionChanged="ColorSuffixCombo_SelectionChanged">
+                                                                    <ComboBox.Style>
+                                                                        <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding Owner.UseColorSuffix}" Value="True">
+                                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </ComboBox.Style>
+                                                                </ComboBox>
+                                                            </WrapPanel>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
                                                 <ItemsControl ItemsSource="{Binding Hits}">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>

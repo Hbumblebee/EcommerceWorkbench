@@ -19,6 +19,7 @@
  *           2026-10-02 读取详情页后搜索 SKU 默认去除原后缀
  *           2026-10-04 未完整核对原因改为逐商品列出并只展示前 5 条
  *           2026-10-07 搜索 SKU 只去末尾通用后缀，保留颜色后缀（否则商品库查不到参考价）
+ *           2026-10-07 组合 SKU 启用颜色后缀时按段各选颜色，再按原组合顺序拼回查重
  */
 
 using System.Collections.ObjectModel;
@@ -805,11 +806,12 @@ public partial class JoomPricingView : UserControl
             var parent = string.IsNullOrWhiteSpace(hit.ParentSku) ? "" : " · Parent SKU " + hit.ParentSku;
             if (!groups.TryGetValue(hit.Sku, out var group))
             {
-                group = new OccupancySkuGroup
-                {
-                    Sku = hit.Sku,
-                    BaseSku = JoomSkuSuffix.StripBase(hit.Sku)
-                };
+                var parts = JoomSkuSuffix.SplitParts(hit.Sku);
+                group = new OccupancySkuGroup(
+                    hit.Sku,
+                    JoomSkuSuffix.StripCompositeTrailingSuffix(
+                        hit.Sku, JoomSkuSuffix.Parse(GeneralSuffixBox.Text)),
+                    parts);
                 groups[hit.Sku] = group;
                 _occupancies.Add(group);
             }
@@ -1004,12 +1006,12 @@ public partial class JoomPricingView : UserControl
     {
         if (_suppressSuggestion)
             return;
-        if (sender is not ComboBox combo || combo.DataContext is not OccupancySkuGroup group || !group.UseColorSuffix)
+        if (sender is not ComboBox combo || combo.DataContext is not SkuPartSlot part || !part.Owner.UseColorSuffix)
             return;
 
-        group.SelectedColor = combo.SelectedItem as string;
-        group.SuggestionUserEdited = false;
-        await RunSuggestionAsync([group]);
+        part.SelectedColor = combo.SelectedItem as string;
+        part.Owner.SuggestionUserEdited = false;
+        await RunSuggestionAsync([part.Owner]);
     }
 
     private void SuggestedSku_TextChanged(object sender, TextChangedEventArgs e)
@@ -1042,7 +1044,8 @@ public partial class JoomPricingView : UserControl
             return;
         }
 
-        var conflict = LocalConflict(group, sku);
+        // 手填的是整串建议 SKU，按整串与本产品其它 SKU、其它建议比对。
+        var conflict = LocalConflict(group, sku, part: null);
         if (conflict is not null)
         {
             group.SuggestionAvailable = false;
@@ -1084,14 +1087,10 @@ public partial class JoomPricingView : UserControl
     private void ReloadColorOptions(OccupancySkuGroup group)
     {
         var colors = JoomSkuSuffix.Parse(ColorSuffixBox.Text);
-        var keep = group.SelectedColor;
         _suppressSuggestion = true;
         try
         {
-            group.ColorOptions.Clear();
-            foreach (var color in colors)
-                group.ColorOptions.Add(color);
-            group.SelectedColor = keep is not null && colors.Contains(keep, StringComparer.OrdinalIgnoreCase) ? keep : null;
+            group.LoadColorOptions(colors);
         }
         finally
         {
@@ -1149,9 +1148,9 @@ public partial class JoomPricingView : UserControl
             {
                 if (!IsSuggestionCurrent(group, tokens, generation) || group.SuggestionUserEdited)
                     continue;
-                if (group.UseColorSuffix && string.IsNullOrWhiteSpace(group.SelectedColor))
+                if (group.NeedsColorSelection)
                 {
-                    SetSuggestion(group, "", "请选择颜色后缀");
+                    SetSuggestion(group, "", "请为每一段选择颜色后缀");
                     continue;
                 }
 
@@ -1187,8 +1186,8 @@ public partial class JoomPricingView : UserControl
                         continue;
                     }
 
-                    var color = group.UseColorSuffix ? group.SelectedColor : null;
-                    var candidate = JoomSkuSuffix.Combine(group.BaseSku, color, general[i]);
+                    // 每一段各自拼「该段基础货号 + 该段颜色 + 通用后缀」，再按原组合顺序连回一个 SKU。
+                    var candidate = group.BuildCandidate(general[i]);
                     if (candidate.Length == 0 || candidate.Contains(',') || !reserved.Add(candidate))
                     {
                         waiting.Add(group);
@@ -1353,15 +1352,34 @@ public partial class JoomPricingView : UserControl
                 reserved.Add(suggested);
         }
 
+        // 各段选好颜色后，该组合里实际会出现的单段 SKU 也要占用掉，
+        // 避免另一条建议（或当前产品）生成同样的段。
+        foreach (var group in _occupancies)
+        {
+            foreach (var part in group.Parts)
+            {
+                var partReserved = NormalizeSku(group.ReservedSku(part));
+                if (partReserved.Length > 0)
+                    reserved.Add(partReserved);
+            }
+        }
+
         return reserved;
     }
 
-    private string? LocalConflict(OccupancySkuGroup group, string sku)
+    private string? LocalConflict(OccupancySkuGroup group, string sku, SkuPartSlot? part)
     {
+        // 组合 SKU 里手动改一段时，只要该段不与其他建议 SKU 撞车即可，
+        // 不能要求整串等于另外那条建议的整串。
+        var checkSku = part is null
+            ? sku
+            : string.Join("+", group.Parts.Select(p =>
+                ReferenceEquals(p, part) ? sku : p.BaseSku));
+
         foreach (var row in _rows)
         {
             var page = NormalizeSku(string.IsNullOrWhiteSpace(row.PageSku) ? row.Sku : row.PageSku);
-            if (page.Length > 0 && page.Equals(sku, StringComparison.OrdinalIgnoreCase))
+            if (page.Length > 0 && page.Equals(checkSku, StringComparison.OrdinalIgnoreCase))
                 return "与当前产品里的 SKU 相同";
         }
 
@@ -1370,7 +1388,7 @@ public partial class JoomPricingView : UserControl
             if (ReferenceEquals(other, group))
                 continue;
             var suggested = NormalizeSku(other.SuggestedSku);
-            if (suggested.Length > 0 && suggested.Equals(sku, StringComparison.OrdinalIgnoreCase))
+            if (suggested.Length > 0 && suggested.Equals(checkSku, StringComparison.OrdinalIgnoreCase))
                 return "与另一条建议 SKU 相同";
         }
 
@@ -1617,35 +1635,51 @@ public partial class JoomPricingView : UserControl
     private sealed class OccupancySkuGroup : INotifyPropertyChanged
     {
         private bool _useColorSuffix;
-        private string? _selectedColor;
         private string _suggestedSku = "";
         private string _suggestStatus = "";
 
+        public OccupancySkuGroup(string sku, string baseSku, IEnumerable<string> parts)
+        {
+            Sku = sku;
+            BaseSku = baseSku;
+            var index = 1;
+            foreach (var part in parts)
+                Parts.Add(new SkuPartSlot(this, index++, part));
+        }
+
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        public string Sku { get; init; } = "";
-        public string BaseSku { get; init; } = "";
+        public string Sku { get; }
+        public string BaseSku { get; }
+        public ObservableCollection<SkuPartSlot> Parts { get; } = [];
         public ObservableCollection<string> ColorOptions { get; } = [];
         public ObservableCollection<OccupancyHitLine> Hits { get; } = [];
         public bool SuggestionUserEdited { get; set; }
         public bool SuggestionAvailable { get; set; }
 
+        public bool HasMultipleParts => Parts.Count > 1;
+
         public string BaseHint =>
             string.Equals(BaseSku, Sku, StringComparison.Ordinal)
-                ? "该 SKU 没有「-」后缀，将直接在末尾拼接。"
-                : "将去掉「-」及其后面的内容，按 " + BaseSku + " 再拼接后缀。";
+                ? "该 SKU 没有可去掉的末尾后缀，将直接在每段末尾拼接。"
+                : "去掉末尾通用后缀（保留颜色后缀）后得到 " + BaseSku + "，再按段拼接。";
 
         public bool UseColorSuffix
         {
             get => _useColorSuffix;
-            set => Set(ref _useColorSuffix, value);
+            set
+            {
+                if (_useColorSuffix == value)
+                    return;
+                _useColorSuffix = value;
+                OnPropertyChanged(nameof(UseColorSuffix));
+                OnPropertyChanged(nameof(NeedsColorSelection));
+            }
         }
 
-        public string? SelectedColor
-        {
-            get => _selectedColor;
-            set => Set(ref _selectedColor, value);
-        }
+        /// <summary>启用了颜色后缀但还有段没选颜色。</summary>
+        public bool NeedsColorSelection =>
+            UseColorSuffix && Parts.Any(part => string.IsNullOrWhiteSpace(part.SelectedColor));
 
         public string SuggestedSku
         {
@@ -1659,12 +1693,90 @@ public partial class JoomPricingView : UserControl
             set => Set(ref _suggestStatus, value);
         }
 
+        /// <summary>刷新颜色选项：所有段共用同一份可选颜色，并尽量保留已选项。</summary>
+        public void LoadColorOptions(IReadOnlyList<string> colors)
+        {
+            ColorOptions.Clear();
+            foreach (var color in colors)
+                ColorOptions.Add(color);
+
+            foreach (var part in Parts)
+            {
+                if (part.SelectedColor is { } current && !colors.Contains(current, StringComparer.OrdinalIgnoreCase))
+                    part.SelectedColor = null;
+            }
+
+            OnPropertyChanged(nameof(NeedsColorSelection));
+        }
+
+        /// <summary>
+        /// 按段拼出候选 SKU：每段 = 该段基础货号 + 该段颜色后缀 + 通用后缀，
+        /// 拼好后按原组合顺序用「+」连回一个完整 SKU。
+        /// </summary>
+        public string BuildCandidate(string generalSuffix)
+        {
+            return string.Join("+", Parts.Select(part =>
+                JoomSkuSuffix.Combine(
+                    part.BaseSku,
+                    UseColorSuffix ? part.SelectedColor : null,
+                    generalSuffix)));
+        }
+
+        /// <summary>该段被选中颜色后，会占用的 SKU（用于和当前产品其它 SKU 去重）。</summary>
+        public string? ReservedSku(SkuPartSlot part) =>
+            UseColorSuffix && !string.IsNullOrWhiteSpace(part.SelectedColor)
+                ? part.BaseSku + part.SelectedColor
+                : null;
+
+        public void NotifyPartsChanged()
+        {
+            OnPropertyChanged(nameof(NeedsColorSelection));
+        }
+
         private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
         {
             if (Equals(field, value))
                 return;
             field = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+
+        private void OnPropertyChanged(string name) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+
+    /// <summary>组合 SKU 的一段：各自选颜色后缀，最后按原顺序拼回一个完整 SKU。</summary>
+    private sealed class SkuPartSlot : INotifyPropertyChanged
+    {
+        private string? _selectedColor;
+
+        public SkuPartSlot(OccupancySkuGroup owner, int index, string sku)
+        {
+            Owner = owner;
+            Index = index;
+            Sku = sku;
+            BaseSku = JoomSkuSuffix.StripBase(sku);
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public OccupancySkuGroup Owner { get; }
+        public int Index { get; }
+        public string Sku { get; }
+        public string BaseSku { get; }
+        public string Label => "第" + Index + "段 " + Sku;
+
+        public string? SelectedColor
+        {
+            get => _selectedColor;
+            set
+            {
+                if (string.Equals(_selectedColor, value, StringComparison.Ordinal))
+                    return;
+                _selectedColor = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedColor)));
+                Owner.NotifyPartsChanged();
+            }
         }
     }
 

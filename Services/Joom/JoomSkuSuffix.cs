@@ -5,6 +5,7 @@
  * 修改记录：2026-10-02 支持组合 SKU 逐项去除后缀
  *           2026-10-02 兼容全角加号与连字符
  *           2026-10-07 新增只去末尾通用后缀（保留颜色）的口径，供「搜索SKU」列使用
+ *           2026-10-07 新增 SplitParts，供组合 SKU 按段选择颜色后缀
  */
 
 namespace EcommerceWorkbench.Services.Joom;
@@ -85,6 +86,19 @@ public static class JoomSkuSuffix
         return string.Join("+", parts
             .Select(part => StripTrailingSuffix(part, generalSuffixes))
             .Where(part => part.Length > 0));
+    }
+
+    /// <summary>
+    /// 拆出组合 SKU 的每一段（保持原顺序，不去后缀）。
+    /// 组合 SKU 里颜色后缀通常只出现在最后一段（<c>4xJ0094+4xJ0103-grey-1</c>），
+    /// 但启用颜色后缀时需要逐段选择，因此由调用方按段处理。
+    /// </summary>
+    public static IReadOnlyList<string> SplitParts(string? sku)
+    {
+        return NormalizeSeparators(sku)
+            .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(part => part.Length > 0)
+            .ToList();
     }
 
     private static string NormalizeSeparators(string? sku)
