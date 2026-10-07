@@ -108,6 +108,8 @@ public sealed class JoomProductService
     private const int PageSize = 100;
     private const int MaxPagesPerLocation = 5;
     private const int EditFallbackBudget = 60;
+    /// <summary>单个位置的请求重试次数（瞬时超时/限流不该把整轮检查判成未核对）。</summary>
+    private const int ScanRetryCount = 2;
     /// <summary>详情诊断最多回传的条数，够定位问题且不至于淹没界面。</summary>
     private const int MaxDetailProbes = 12;
     /// <summary>占用检查按此数量分批搜索，避免单个 searchValue 过大触发后端截断。</summary>
@@ -322,6 +324,10 @@ public sealed class JoomProductService
         };
     }
 
+    /// <summary>
+    /// 扫描一个位置。单次请求失败多为瞬时限流/超时，先重试；
+    /// 否则一次网络抖动就会把整轮检查标成「未完整核对」，并连带否决所有建议。
+    /// </summary>
     private async Task ScanLocationAsync(
         JoomListLocation location,
         string searchValue,
@@ -339,11 +345,59 @@ public sealed class JoomProductService
         Func<bool> tryConsumeEditFallback,
         CancellationToken cancellationToken)
     {
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            var pageNo = 1;
-            var totalPage = 1;
-            while (pageNo <= MaxPagesPerLocation)
+            try
+            {
+                await ScanLocationCoreAsync(
+                    location,
+                    searchValue,
+                    shopNames,
+                    currentProductId,
+                    currentProductName,
+                    wanted,
+                    cookieHeader,
+                    hits,
+                    completed,
+                    seen,
+                    incomplete,
+                    probes,
+                    tryConsumeEditFallback,
+                    cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (!CookieErrorDetector.IsAuthFailure(ex.Message))
+            {
+                if (attempt >= ScanRetryCount)
+                {
+                    failures.Add(location.Label + "（重试 " + attempt + " 次仍失败）");
+                    return;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(400 * (attempt + 1)), cancellationToken);
+            }
+        }
+    }
+
+    private async Task ScanLocationCoreAsync(
+        JoomListLocation location,
+        string searchValue,
+        IReadOnlyDictionary<string, string> shopNames,
+        string currentProductId,
+        string currentProductName,
+        Dictionary<string, string> wanted,
+        string cookieHeader,
+        ConcurrentBag<JoomSkuOccupancy> hits,
+        ConcurrentBag<string> completed,
+        ConcurrentDictionary<string, byte> seen,
+        ConcurrentDictionary<string, byte> incomplete,
+        ConcurrentBag<JoomDetailProbe> probes,
+        Func<bool> tryConsumeEditFallback,
+        CancellationToken cancellationToken)
+    {
+        var pageNo = 1;
+        var totalPage = 1;
+        while (pageNo <= MaxPagesPerLocation)
             {
                 var body = BuildListBody(pageNo, searchValue, shopId: null, location.Extra);
                 var (status, responseBody) = await _apiClient.SendAsync(
@@ -510,17 +564,40 @@ public sealed class JoomProductService
             }
 
             completed.Add(location.Label);
-        }
-        catch (Exception ex) when (!CookieErrorDetector.IsAuthFailure(ex.Message))
-        {
-            failures.Add(location.Label);
-        }
     }
 
     /// <summary>
-    /// 读取编辑页全量变种 SKU。失败时返回诊断信息（probe），用于说明「为什么这个商品没核对完整」。
+    /// 读取编辑页全量变种 SKU，失败先重试（掉一次就会把该商品标成「未核对」）。
+    /// 仍失败时返回诊断信息（probe），用于说明「为什么这个商品没核对完整」。
     /// </summary>
     private async Task<(List<string> Skus, JoomDetailProbe? Probe)> TryReadEditSkusAsync(
+        string productId,
+        string cookieHeader,
+        CancellationToken cancellationToken,
+        string locationLabel,
+        IReadOnlyCollection<string> visible,
+        int listVariantSize)
+    {
+        (List<string> Skus, JoomDetailProbe Probe) last = ([], new JoomDetailProbe
+        {
+            Location = locationLabel,
+            ProductId = productId,
+            VisibleCount = visible.Count,
+            VisibleSample = string.Join("/", visible.Take(6))
+        });
+        for (var attempt = 0; ; attempt++)
+        {
+            last = await ReadEditSkusOnceAsync(
+                productId, cookieHeader, cancellationToken, locationLabel, visible, listVariantSize);
+            if (last.Skus.Count > 0 || attempt >= ScanRetryCount)
+                break;
+            await Task.Delay(TimeSpan.FromMilliseconds(400 * (attempt + 1)), cancellationToken);
+        }
+
+        return (last.Skus, last.Skus.Count == 0 ? last.Probe : null);
+    }
+
+    private async Task<(List<string> Skus, JoomDetailProbe Probe)> ReadEditSkusOnceAsync(
         string productId,
         string cookieHeader,
         CancellationToken cancellationToken,
@@ -536,7 +613,7 @@ public sealed class JoomProductService
             ProductId = productId,
             VisibleCount = visible.Count,
             VisibleSample = string.Join("/", visible.Take(6)),
-            RequestUrl = apiUrl
+            RequestUrl = EditJsonUrl + "?id=" + Uri.EscapeDataString(productId)
         };
 
         try
@@ -579,7 +656,7 @@ public sealed class JoomProductService
             // 详情响应的 variantSize 恒为 0，不能当总数用，这里以实际读到的条数为准。
             var variants = ReadVariants(product);
             probe = probe with { VariantCount = variants.Count, VariantSize = listVariantSize };
-            return (variants, variants.Count == 0 ? probe : null);
+            return (variants, probe);
         }
         catch (JsonException)
         {

@@ -1,9 +1,10 @@
 /*
  * 功能说明：把 JOOM 重复 SKU 拆成基础货号，再按通用后缀、颜色后缀拼出候选 SKU。
- * 主要职责：解析中英文逗号分隔的后缀列表；去掉原 SKU 第一个「-」及其后面的内容；按「基础 + 颜色 + 通用」拼接。
+ * 主要职责：解析中英文逗号分隔的后缀列表；按需去掉后缀（保留颜色）或去掉整个后缀；按「基础 + 颜色 + 通用」拼接。
  * 创建日期：2026-09-29
  * 修改记录：2026-10-02 支持组合 SKU 逐项去除后缀
  *           2026-10-02 兼容全角加号与连字符
+ *           2026-10-07 新增只去末尾通用后缀（保留颜色）的口径，供「搜索SKU」列使用
  */
 
 namespace EcommerceWorkbench.Services.Joom;
@@ -46,6 +47,44 @@ public static class JoomSkuSuffix
             '+',
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return string.Join("+", parts.Select(StripBase).Where(part => part.Length > 0));
+    }
+
+    /// <summary>
+    /// 只去掉末尾的通用后缀，保留颜色后缀。
+    /// 店小秘商品库里的货号是带颜色的（<c>4xJ0058-black</c>、<c>12xJ0103-grey</c>），
+    /// 把颜色一起去掉（<c>4xJ0058</c>）会查不到参考价；而颜色后缀之后那段
+    /// （<c>-001</c>、<c>-1</c>、<c>-AS01</c> 等）才是报价时现加的，应当去掉。
+    /// </summary>
+    public static string StripTrailingSuffix(string? sku, IEnumerable<string>? generalSuffixes)
+    {
+        var text = NormalizeSeparators(sku);
+        if (text.Length == 0)
+            return text;
+
+        if (generalSuffixes is not null)
+        {
+            // 从长到短匹配，避免「-1」抢先命中「-01」而错误地切掉「-0」。
+            foreach (var suffix in generalSuffixes
+                         .Where(s => !string.IsNullOrEmpty(s))
+                         .OrderByDescending(s => s.Length))
+            {
+                if (text.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    return text[..^suffix.Length].Trim();
+            }
+        }
+
+        return text;
+    }
+
+    /// <summary>组合 SKU 的每一段各自去掉末尾通用后缀，保留颜色后缀。</summary>
+    public static string StripCompositeTrailingSuffix(string? sku, IEnumerable<string>? generalSuffixes)
+    {
+        var parts = NormalizeSeparators(sku).Split(
+            '+',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return string.Join("+", parts
+            .Select(part => StripTrailingSuffix(part, generalSuffixes))
+            .Where(part => part.Length > 0));
     }
 
     private static string NormalizeSeparators(string? sku)

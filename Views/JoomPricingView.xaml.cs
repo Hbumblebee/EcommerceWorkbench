@@ -18,6 +18,7 @@
  *           2026-10-02 建议 SKU 改为表格展示，由用户一键应用或恢复原 SKU
  *           2026-10-02 读取详情页后搜索 SKU 默认去除原后缀
  *           2026-10-04 未完整核对原因改为逐商品列出并只展示前 5 条
+ *           2026-10-07 搜索 SKU 只去末尾通用后缀，保留颜色后缀（否则商品库查不到参考价）
  */
 
 using System.Collections.ObjectModel;
@@ -561,6 +562,9 @@ public partial class JoomPricingView : UserControl
         _suppressAutoCalc = true;
         try
         {
+            // 搜索 SKU 只去掉末尾通用后缀，保留颜色后缀：店小秘商品库的货号带颜色
+            // （4xJ0058-black、12xJ0103-grey），去掉颜色会查不到参考价。
+            var generalSuffixes = JoomSkuSuffix.Parse(GeneralSuffixBox.Text);
             _rows.Clear();
             foreach (var group in detail.UniqueSkus)
             {
@@ -568,7 +572,7 @@ public partial class JoomPricingView : UserControl
                 {
                     PageSku = group.PageSku,
                     AppliedPageSku = group.PageSku,
-                    Sku = JoomSkuSuffix.StripCompositeBases(group.PageSku)
+                    Sku = JoomSkuSuffix.StripCompositeTrailingSuffix(group.PageSku, generalSuffixes)
                 });
             }
 
@@ -1288,6 +1292,13 @@ public partial class JoomPricingView : UserControl
         return parts.Count > 3 ? shown + " 等 " + parts.Count + " 处" : shown;
     }
 
+    /// <summary>把未核对范围写成一段带换行的补充说明，没有缺口时返回空串。</summary>
+    private static string BuildVerifyGapNote(JoomSkuOccupancyReport report)
+    {
+        var gap = BuildVerifyGap(report);
+        return gap is null ? "" : "\n以下范围未完整核对：" + gap;
+    }
+
     private async Task<JoomSkuOccupancyReport> QueryOccupancyAsync(IReadOnlyList<string> skus, int generation)
     {
         await _suggestLock.WaitAsync();
@@ -1482,28 +1493,39 @@ public partial class JoomPricingView : UserControl
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .OrderBy(sku => sku, StringComparer.OrdinalIgnoreCase)
                         .ToList();
-                    var unconfirmed = uncheckedTargets
-                        .Where(sku => !occupied.Contains(sku, StringComparer.OrdinalIgnoreCase))
-                        .ToList();
-                    if (occupied.Count > 0 || unconfirmed.Count > 0)
+
+                    // 只有「确证被占用」才取消：那一定会触发店小秘的「产品重复」。
+                    // 「没核对完」只代表范围没查全，不应一票否决——否则一次网络抖动或
+                    // 分页截断就能让所有建议 SKU 永远无法应用。改为提示并让用户决定。
+                    if (occupied.Count > 0)
                     {
-                        var detail = (occupied.Count == 0 ? "" : "\n已被占用：" + string.Join("、", occupied))
-                                     + (unconfirmed.Count == 0 ? "" : "\n仍未核对完：" + string.Join("、", unconfirmed))
-                                     + (confirm.FailedLocations.Count == 0 && confirm.IncompleteReasons.Count == 0
-                                         ? ""
-                                         : "\n未核对范围：" + string.Join(
-                                             "、",
-                                             confirm.FailedLocations
-                                                 .Concat(confirm.IncompleteReasons)
-                                                 .Distinct(StringComparer.Ordinal)
-                                                 .Take(3)));
-                        SetStatus("写回前复检未通过，已取消应用建议 SKU。");
+                        var occupiedDetail = "\n已被占用：" + string.Join("、", occupied)
+                            + BuildVerifyGapNote(confirm);
+                        SetStatus("写回前复检发现建议 SKU 已被占用，已取消应用。");
                         MessageBox.Show(
-                            "写回前复检未通过，已取消应用，详情页未被修改。" + detail,
+                            "写回前复检发现以下建议 SKU 已被占用，已取消应用，详情页未被修改。"
+                            + occupiedDetail,
                             "应用新SKU",
                             MessageBoxButton.OK,
                             MessageBoxImage.Warning);
                         return;
+                    }
+
+                    var gap = BuildVerifyGap(confirm);
+                    if (gap is not null)
+                    {
+                        var answer = MessageBox.Show(
+                            "这些建议 SKU 没有发现被占用，但以下范围未能完整核对：\n"
+                            + gap
+                            + "\n\n仍要写入详情页吗？（店小秘保存时还会再做一次重复校验）",
+                            "应用新SKU",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question);
+                        if (answer != MessageBoxResult.Yes)
+                        {
+                            SetStatus("已取消应用建议 SKU。");
+                            return;
+                        }
                     }
                 }
             }
