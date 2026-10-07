@@ -24,6 +24,8 @@ public sealed class Smt7Row : INotifyPropertyChanged
     private string? _retailPrice;
     private string? _markup;
     private string? _finalPrice;
+    private string? _suggestedSku;
+    private string? _appliedPageSku;
     private string? _status;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -46,6 +48,20 @@ public sealed class Smt7Row : INotifyPropertyChanged
     {
         get => _sku;
         set => Set(ref _sku, value);
+    }
+
+    /// <summary>产品重复时算出的、确认未被同店铺占用的新 SKU；由用户决定是否写入详情页。</summary>
+    public string? SuggestedSku
+    {
+        get => _suggestedSku;
+        set => Set(ref _suggestedSku, value);
+    }
+
+    /// <summary>详情页当前实际的变种 SKU；应用建议后与 PageSku 不同，用于「恢复原SKU」。</summary>
+    public string? AppliedPageSku
+    {
+        get => _appliedPageSku;
+        set => Set(ref _appliedPageSku, value);
     }
 
     /// <summary>产品成本（人民币），来自店小秘参考价。</summary>

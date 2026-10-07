@@ -1,5 +1,5 @@
 /*
- * 功能说明：用已导出 Cookie 打开店小秘速卖通全托管编辑页，读取变种 SKU、货品条码与货品重量，并回写供货价。
+ * 功能说明：用已导出 Cookie 打开店小秘速卖通全托管编辑页，读取变种 SKU、货品条码与货品重量，回写供货价，并支持替换变种 SKU。
  * 创建日期：2026-09-13
  * 更新日期：2026-09-13 读取货品条码与 packageWeight，供按条码匹配重量
  * 修改记录：2026-10-03 注入层契约自检（探测 smtChoiceSkuDataStore 是否存在）+ 写后回读验证（Verified）
@@ -74,6 +74,27 @@ public partial class Smt7ProductPageWindow : Window
         var mapJson = JsonSerializer.Serialize(pageSkuToPrice);
         var script = WriteScriptPrefix + mapJson + WriteScriptSuffix;
         var raw = await Browser.CoreWebView2.ExecuteScriptAsync(script);
+        return ParseWriteResult(raw);
+    }
+
+    /// <summary>
+    /// 把变种表的 SKU 编码按「原 SKU → 新 SKU」逐个替换（用于产品重复时换成未占用的 SKU）。
+    /// 与写价一样带写后回读确认，避免「赋了值但页面没生效」的假成功。
+    /// </summary>
+    public async Task<Smt7PageWriteResult> ReplaceSkusAsync(
+        IReadOnlyDictionary<string, string> oldSkuToNewSku,
+        CancellationToken cancellationToken = default)
+    {
+        if (oldSkuToNewSku.Count == 0)
+            return new Smt7PageWriteResult { Error = "没有需要替换的 SKU。" };
+
+        await EnsureCoreAsync();
+        if (Browser.CoreWebView2 is null)
+            return new Smt7PageWriteResult { Error = "产品详情页尚未初始化。" };
+
+        await WaitUntilSkuTableReadyAsync(cancellationToken);
+        var mapJson = JsonSerializer.Serialize(oldSkuToNewSku);
+        var raw = await Browser.CoreWebView2.ExecuteScriptAsync(ReplaceSkuScriptPrefix + mapJson + ReplaceSkuScriptSuffix);
         return ParseWriteResult(raw);
     }
 
@@ -450,6 +471,43 @@ public partial class Smt7ProductPageWindow : Window
           const missed = [];
           for (const key of Object.keys(map)) {
             if (!seen[key.toLowerCase()]) missed.push(key);
+          }
+          return { updated: updated, verified: verified, missed: missed };
+        })();
+        """;
+
+    private const string ReplaceSkuScriptPrefix = """
+        (function () {
+          const map =
+        """;
+
+    private const string ReplaceSkuScriptSuffix = """
+        ;
+          function lookupExact(sku) {
+            if (!sku) return null;
+            if (Object.prototype.hasOwnProperty.call(map, sku)) return map[sku];
+            return null;
+          }
+          const rows = window.__dxmSmtFindSkuRows && window.__dxmSmtFindSkuRows();
+          if (!rows || !rows.length) return { updated: 0, verified: 0, missed: Object.keys(map), error: '未找到变种信息表格' };
+          const seen = {};
+          let updated = 0;
+          let verified = 0;
+          for (const row of rows) {
+            const sku = String(row.skuCode || row.sku || '').trim();
+            if (!sku) continue;
+            const next = lookupExact(sku);
+            if (next == null || next === '') continue;
+            const text = String(next);
+            row.skuCode = text;
+            // 写后回读：赋值成功且读回一致才算 verified，避免「赋了值但页面没生效」的假成功。
+            if (String(row.skuCode || row.sku || '').trim() === text) verified += 1;
+            seen[sku] = true;
+            updated += 1;
+          }
+          const missed = [];
+          for (const key of Object.keys(map)) {
+            if (!seen[key]) missed.push(key);
           }
           return { updated: updated, verified: verified, missed: missed };
         })();

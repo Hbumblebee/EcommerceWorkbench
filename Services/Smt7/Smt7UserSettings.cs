@@ -30,6 +30,18 @@ public sealed class Smt7UserSettings
     /// <summary>中英文逗号分隔；打开详情页生成「搜索SKU」时去掉这些末尾后缀。</summary>
     public string GeneralSkuSuffixes { get; set; } = DefaultGeneralSkuSuffixes;
 
+    /// <summary>启用颜色后缀时可选的颜色；与 JOOM 页共用同一份默认值。</summary>
+    public string OccupancyColorSuffixes { get; set; } = JoomUserSettings.DefaultColorSkuSuffixes;
+
+    /// <summary>查重时是否启用颜色后缀（组合 SKU 会按段各选一个颜色）。</summary>
+    public bool OccupancyUseColorSuffix { get; set; }
+
+    /// <summary>查重范围：all（采集箱+待发布+在线）/ online / offline / draft。</summary>
+    public string OccupancyScope { get; set; } = "all";
+
+    /// <summary>查重店铺：auto=跟随当前产品所属店铺，否则为具体 shopId。</summary>
+    public string OccupancyShopId { get; set; } = "auto";
+
     public static string GetFilePath() => Path.Combine(AppPaths.DataDirectory, "smt7-settings.json");
 
     public static Smt7UserSettings Load()

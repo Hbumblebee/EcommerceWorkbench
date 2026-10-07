@@ -6,6 +6,7 @@
  *           2026-10-02 兼容全角加号与连字符
  *           2026-10-07 新增只去末尾通用后缀（保留颜色）的口径，供「搜索SKU」列使用
  *           2026-10-07 新增 SplitParts，供组合 SKU 按段选择颜色后缀
+ *           2026-10-08 去掉后缀后补齐清掉残留的「-」（后缀列表里 AS/AS01 不带前导「-」时会留下 12xJ0021-）
  */
 
 namespace EcommerceWorkbench.Services.Joom;
@@ -55,6 +56,8 @@ public static class JoomSkuSuffix
     /// 店小秘商品库里的货号是带颜色的（<c>4xJ0058-black</c>、<c>12xJ0103-grey</c>），
     /// 把颜色一起去掉（<c>4xJ0058</c>）会查不到参考价；而颜色后缀之后那段
     /// （<c>-001</c>、<c>-1</c>、<c>-AS01</c> 等）才是报价时现加的，应当去掉。
+    /// 注意后缀列表里有 <c>AS</c>/<c>AS01</c> 这种不带前导「-」的写法，
+    /// 去掉后要再把剩下的分隔符「-」补齐清掉（否则会留下 <c>12xJ0021-</c>）。
     /// </summary>
     public static string StripTrailingSuffix(string? sku, IEnumerable<string>? generalSuffixes)
     {
@@ -69,8 +72,11 @@ public static class JoomSkuSuffix
                          .Where(s => !string.IsNullOrEmpty(s))
                          .OrderByDescending(s => s.Length))
             {
-                if (text.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                    return text[..^suffix.Length].Trim();
+                if (!text.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var trimmed = text[..^suffix.Length].Trim();
+                return trimmed.TrimEnd('-').Trim();
             }
         }
 
