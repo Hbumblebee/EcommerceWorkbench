@@ -7,6 +7,7 @@
  *           2026-10-07 新增按「当前店铺」的 SKU 查重：占用面板、建议 SKU、一键应用/恢复
  *           2026-10-07 查重范围/店铺可选；查重后缀独立可编辑
  *           2026-10-07 查重面板与 JOOM 对齐：启用颜色后缀后组合 SKU 逐段选色，按原顺序拼回
+ *           2026-10-08 页面排布与滚动对齐 JOOM：整页 ScrollViewer + 表格/重复区到边界后交给整页
  */
 
 using System.Collections.ObjectModel;
@@ -17,11 +18,14 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
 using EcommerceWorkbench.Models;
 using EcommerceWorkbench.Services;
 using EcommerceWorkbench.Services.Dianxiaomi;
 using EcommerceWorkbench.Services.Joom;
 using EcommerceWorkbench.Services.Smt7;
+using EcommerceWorkbench.UI;
 
 namespace EcommerceWorkbench.Views;
 
@@ -74,6 +78,44 @@ public partial class Smt7PricingView : UserControl
         DetailProbeList.ItemsSource = _detailProbes;
         OccupancyShopCombo.ItemsSource = _shopOptions;
         Loaded += Smt7PricingView_Loaded;
+    }
+
+    /// <summary>
+    /// 统一接管滚轮：优先滚动鼠标所在的重复区或表格，到边界后平滑交给整页。
+    /// 与 JOOM 页同一套做法。
+    /// </summary>
+    private void PageScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        ScrollViewer target = PageScroll;
+        if (OccupancyScroll.IsMouseOver && SmoothScrollHelper.CanScroll(OccupancyScroll, e.Delta))
+        {
+            target = OccupancyScroll;
+        }
+        else if (PricingGrid.IsMouseOver)
+        {
+            var gridScroll = FindVisualChild<ScrollViewer>(PricingGrid, "DG_ScrollViewer");
+            if (gridScroll is not null && SmoothScrollHelper.CanScroll(gridScroll, e.Delta))
+                target = gridScroll;
+        }
+
+        SmoothScrollHelper.ScrollWheel(target, e.Delta);
+        e.Handled = true;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match && (name.Length == 0 || match.Name == name))
+                return match;
+
+            var nested = FindVisualChild<T>(child, name);
+            if (nested is not null)
+                return nested;
+        }
+
+        return null;
     }
 
     public void Cleanup()

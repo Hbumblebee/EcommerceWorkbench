@@ -120,28 +120,28 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid>
+    <ScrollViewer x:Name="PageScroll"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  PreviewMouseWheel="PageScroll_PreviewMouseWheel">
+    <Grid Margin="14,10,14,8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0"
-                Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="0,0,0,1"
-                Padding="16,12">
-            <StackPanel>
-                <TextBlock Text="速卖通7 批量定价"
-                           Style="{StaticResource PageTitleStyle}"/>
-                <TextBlock Text="打开店小秘速卖通全托管详情页读取【变种信息】SKU；重量按货品条码匹配【货品信息】的重量(kg)；搜索只取参考价，再按全托2.0计算并回写供货价"
-                           Style="{StaticResource PageDescriptionStyle}"/>
-            </StackPanel>
-        </Border>
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="速卖通7 批量定价"
+                       Style="{StaticResource PageTitleStyle}"
+                       VerticalAlignment="Center"/>
+            <TextBlock Text="读取变种 SKU → 搜索参考价 → 按全托2.0计算 → 回写供货价"
+                       Style="{StaticResource PageDescriptionStyle}"
+                       Margin="12,0,0,0"
+                       VerticalAlignment="Center"/>
+        </DockPanel>
 
         <Border Grid.Row="1"
                 Background="{StaticResource PanelBrush}"
@@ -149,19 +149,13 @@
                 BorderThickness="1"
                 CornerRadius="10"
                 Padding="14,10"
-                Margin="0,10,0,8">
+                Margin="0,0,0,8">
             <StackPanel>
-                <Expander IsExpanded="False"
-                          Foreground="{StaticResource TextBrush}"
-                          Margin="0,0,0,8">
+                <Expander Style="{StaticResource SectionExpander}"
+                          IsExpanded="False">
                     <Expander.Header>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="分档参数"
-                                       Style="{StaticResource SectionTitleStyle}"/>
-                            <TextBlock Text="  ·  默认折叠，展开后可维护全托2.0公式"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       VerticalAlignment="Center"/>
-                        </StackPanel>
+                        <TextBlock Text="分档参数 · 默认对齐全托2.0（展开后可维护成本分档与重量加价）"
+                                   Foreground="{StaticResource MutedBrush}"/>
                     </Expander.Header>
                     <StackPanel Margin="0,8,0,0">
                 <TextBlock Text="公式对齐计算表「全托2.0」：零售价 = ROUND((成本/分子1 + 常量)/分子2, 2)；最终价 = ROUND(零售价 + 重量加价, 2)。换算重量取详情页【货品信息】重量(kg)，按货品条码与【变种信息】唯一匹配；重量(g) = kg×1000。搜索只填充成本。修改分档后失焦即保存并重算。"
@@ -390,6 +384,44 @@
                             Click="RefreshShops_Click"
                             ToolTip="拉取速卖通全托管下有商品的店铺，供上面下拉选择"/>
                 </WrapPanel>
+                <Expander Style="{StaticResource SectionExpander}"
+                          IsExpanded="False"
+                          Margin="0,8,0,0">
+                    <Expander.Header>
+                        <TextBlock Text="SKU 后缀（产品重复时使用）"
+                                   Foreground="{StaticResource MutedBrush}"/>
+                    </Expander.Header>
+                    <StackPanel Margin="0,6,0,0">
+                        <TextBlock Text="中英文逗号均可。「搜索SKU」打开详情页时去掉末尾的通用后缀、保留颜色；查重发现重复时，再按顺序拼接通用后缀生成新 SKU（启用颜色后缀则每段各选一个颜色）。"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,6"/>
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="通用后缀"
+                                       Width="64"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,10,0"
+                                       Foreground="{StaticResource TextBrush}"/>
+                            <TextBox x:Name="SuffixBox"
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="中英文逗号分隔。去掉「搜索SKU」末尾的这一段，并在查重时按顺序拼接出未占用的新 SKU"
+                                     LostFocus="SuffixBox_LostFocus"/>
+                        </DockPanel>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="颜色后缀"
+                                       Width="64"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,10,0"
+                                       Foreground="{StaticResource TextBrush}"/>
+                            <TextBox x:Name="ColorSuffixBox"
+                                     VerticalContentAlignment="Center"
+                                     ToolTip="中英文逗号分隔。查重时启用颜色后缀后，组合 SKU 的每一段各选一个颜色"
+                                     LostFocus="ColorSuffixBox_LostFocus"/>
+                        </DockPanel>
+                    </StackPanel>
+                </Expander>
                 <Border x:Name="OccupancyPanel"
                         Visibility="Collapsed"
                         Background="#FEF2F2"
@@ -406,7 +438,8 @@
                                            FontWeight="Bold"
                                            TextWrapping="Wrap"/>
                             </Expander.Header>
-                            <ScrollViewer MaxHeight="260"
+                            <ScrollViewer x:Name="OccupancyScroll"
+                                          MinHeight="330"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled"
                                           Margin="0,6,0,0">
@@ -573,6 +606,8 @@
                 BorderThickness="1"
                 CornerRadius="10">
             <DataGrid x:Name="PricingGrid"
+                      MinHeight="400"
+                      Height="400"
                       AutoGenerateColumns="False"
                       CanUserAddRows="False"
                       CanUserDeleteRows="False"
@@ -697,53 +732,11 @@
             </DataGrid>
         </Border>
 
-        <Border Grid.Row="4"
-                Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="10"
-                Padding="12,8"
-                Margin="0,8,0,0">
-            <Expander Style="{StaticResource SectionExpander}" IsExpanded="False">
-                <Expander.Header>
-                    <TextBlock Text="SKU 后缀（产品重复时使用）"
-                               Foreground="{StaticResource MutedBrush}"/>
-                </Expander.Header>
-                <StackPanel Margin="0,6,0,0">
-                    <TextBlock Text="中英文逗号均可。「搜索SKU」打开详情页时去掉末尾的通用后缀、保留颜色；查重发现重复时，再按顺序拼接通用后缀生成新 SKU（启用颜色后缀则每段各选一个颜色）。"
-                               Foreground="{StaticResource MutedBrush}"
-                               TextWrapping="Wrap"
-                               Margin="0,0,0,6"/>
-                    <DockPanel Margin="0,0,0,6">
-                        <TextBlock DockPanel.Dock="Left"
-                                   Text="通用后缀"
-                                   Width="76"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextBrush}"/>
-                        <TextBox x:Name="SuffixBox"
-                                 VerticalContentAlignment="Center"
-                                 ToolTip="中英文逗号分隔。去掉「搜索SKU」末尾的这一段，并在查重时按顺序拼接出未占用的新 SKU"
-                                 LostFocus="SuffixBox_LostFocus"/>
-                    </DockPanel>
-                    <DockPanel>
-                        <TextBlock DockPanel.Dock="Left"
-                                   Text="颜色后缀"
-                                   Width="76"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextBrush}"/>
-                        <TextBox x:Name="ColorSuffixBox"
-                                 VerticalContentAlignment="Center"
-                                 ToolTip="中英文逗号分隔。查重时启用颜色后缀后，组合 SKU 的每一段各选一个颜色"
-                                 LostFocus="ColorSuffixBox_LostFocus"/>
-                    </DockPanel>
-                </StackPanel>
-            </Expander>
-        </Border>
-
-        <TextBlock Grid.Row="5"
+        <TextBlock Grid.Row="4"
                    Margin="4,8,4,0"
                    Foreground="{StaticResource MutedBrush}"
                    TextWrapping="Wrap"
                    Text="提示：黄色列为可编辑（搜索SKU、成本、重量、换算重量）· 打开详情页时重量优先按货品条码匹配【货品信息】重量(kg)，无货品条码时用变种自带重量 · 搜索不改重量 · 改克或千克会互相同步 · 最终价写入详情页供货价"/>
     </Grid>
+    </ScrollViewer>
 </UserControl>
