@@ -312,6 +312,7 @@
                         CornerRadius="6"
                         Padding="10,8"
                         Margin="0,8,0,0">
+                    <StackPanel>
                     <Expander x:Name="OccupancyExpander"
                               Style="{StaticResource SectionExpander}"
                               IsExpanded="True"
@@ -403,6 +404,40 @@
                             </ItemsControl>
                         </ScrollViewer>
                     </Expander>
+                    <Expander x:Name="DetailProbeExpander"
+                              Visibility="Collapsed"
+                              Margin="0,6,0,0"
+                              Foreground="#7F1D1D">
+                        <Expander.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="详情核对失败诊断"
+                                           Foreground="#7F1D1D"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"/>
+                                <Button Content="复制"
+                                        Style="{StaticResource GhostButton}"
+                                        Padding="6,1"
+                                        Margin="8,0,0,0"
+                                        Click="CopyDetailProbes_Click"
+                                        ToolTip="复制诊断内容，便于排查为什么读不到详情变种"/>
+                            </StackPanel>
+                        </Expander.Header>
+                        <ListBox x:Name="DetailProbeList"
+                                 MaxHeight="150"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="#7F1D1D"
+                                 FontSize="11"
+                                 HorizontalContentAlignment="Stretch">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}"
+                                               TextWrapping="Wrap"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Expander>
+                    </StackPanel>
                 </Border>
             </StackPanel>
         </Border>

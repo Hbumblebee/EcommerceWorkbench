@@ -1,0 +1,1 @@
+const o=window.VxeUI,V=o.VxeButton,x=o.VxeLoading,s=o.VxePager,a=o.VxeTooltip,e=window.VXETable,t=window.VxeUI||e.VxeUI||e,c=e.VxeColgroup,l=e.VxeColumn,d=e.VxeGrid,i=e.VxeTable,n=window.VxeLanguageZhCn,g=n.default||n;export{t as V,s as a,x as b,a as c,d,i as e,l as f,V as g,c as h,g as z};

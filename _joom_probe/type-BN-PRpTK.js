@@ -1,0 +1,1 @@
+var l=(i=>(i.PublishingTiming="publishingTiming",i.Publishing="publishing",i.PublishFail="publishFail",i))(l||{}),n=(i=>(i.Draft="draft",i.Offline="offline",i.Online="online",i))(n||{});const s={draft:"采集箱",publishingTiming:"定时发布",publishing:"发布中",publishFail:"发布失败",online:"在线产品",offline:"待发布产品"};export{l as D,n as a,s as b};

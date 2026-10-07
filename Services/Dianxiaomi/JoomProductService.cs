@@ -8,6 +8,9 @@
  *           2026-09-28 SKU 占用改为检查全部店铺
  *           2026-10-02 支持以 + 分隔的组合 SKU 逐项精确检查
  *           2026-10-03 占用检查按 SKU 分批搜索；失败位置与「未核对原因」分开报告，不再伪装成位置名
+ *           2026-10-04 列表变种表覆盖不全时改读详情页补全，避免部分命中导致其余 SKU 漏检（假阴性）
+ *           2026-10-07 用列表行的 variantSize 识别变种截断，截断商品一律读 edit.json 全量变种核对
+ *           2026-10-07 组合货号不再按「+」拆分：搜索与比对一律用完整 SKU，消除组合货号误报
  */
 
 using System.Collections.Concurrent;
@@ -45,6 +48,50 @@ public sealed class JoomSkuOccupancyReport
     public List<string> FailedLocations { get; init; } = [];
     /// <summary>部分内容未完成核对的原因（如详情核对预算用尽、结果超过分页上限），不混入 FailedLocations。</summary>
     public List<string> IncompleteReasons { get; init; } = [];
+    /// <summary>详情页读不到变种时的诊断记录，用于定位「为什么没核对完整」。</summary>
+    public List<string> DetailProbes { get; init; } = [];
+}
+
+/// <summary>
+/// 详情页读不到变种时的诊断信息：记录请求地址与响应外形，
+/// 便于区分「id 不是主商品 id」「接口返回失败」「变种字段名不匹配」。
+/// </summary>
+public sealed record JoomDetailProbe
+{
+    public string Location { get; init; } = "";
+    public string ProductId { get; init; } = "";
+    public int VisibleCount { get; init; }
+    public string VisibleSample { get; init; } = "";
+    public string RequestUrl { get; init; } = "";
+    public int HttpStatus { get; init; }
+    public int? Code { get; init; }
+    public string Message { get; init; } = "";
+    public string TopKeys { get; init; } = "";
+    public int VariantCount { get; init; }
+    /// <summary>列表行声明的变种总数（用于判断列表是否截断了变种）。</summary>
+    public int VariantSize { get; init; }
+    public string BodySample { get; init; } = "";
+    public string Error { get; init; } = "";
+
+    /// <summary>压成一行，方便在界面里直接复制排查。</summary>
+    public string ToDiagnostic()
+    {
+        var lines = new List<string>
+        {
+            "[" + Location + "] id=" + ProductId + " http=" + HttpStatus + " code=" + (Code?.ToString(CultureInfo.InvariantCulture) ?? "?")
+        };
+        if (Message.Length > 0)
+            lines.Add("msg=" + Message);
+        if (Error.Length > 0)
+            lines.Add("err=" + Error);
+        lines.Add("list可见=" + VisibleCount + "个(声明" + VariantSize + "个) " + VisibleSample);
+        lines.Add("edit变种=" + VariantCount + "个");
+        if (TopKeys.Length > 0)
+            lines.Add("顶层字段=" + TopKeys);
+        if (BodySample.Length > 0)
+            lines.Add("响应=" + BodySample);
+        return string.Join(" | ", lines);
+    }
 }
 
 public sealed class JoomVariantSkuGroup
@@ -61,6 +108,8 @@ public sealed class JoomProductService
     private const int PageSize = 100;
     private const int MaxPagesPerLocation = 5;
     private const int EditFallbackBudget = 60;
+    /// <summary>详情诊断最多回传的条数，够定位问题且不至于淹没界面。</summary>
+    private const int MaxDetailProbes = 12;
     /// <summary>占用检查按此数量分批搜索，避免单个 searchValue 过大触发后端截断。</summary>
     private const int OccupancySearchBatchSize = 20;
 
@@ -163,13 +212,17 @@ public sealed class JoomProductService
         IReadOnlyList<string> skus,
         string? currentProductId,
         string cookieHeader,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? currentProductName = null)
     {
         if (string.IsNullOrWhiteSpace(cookieHeader))
             throw new InvalidOperationException("请先导出 Cookie。");
 
+        // 待查集合就是完整货号本身。组合货号（J0071-1+J0043-1）是店小秘里的**一个**变种 SKU，
+        // 不按「+」拆分：拆开会让 J0043-1 被当成只提供 J0075+J0043-1 的产品占用（假阳性），
+        // 也会把大量无关商品拉进候选集。查重全程只认完整 SKU 精确相等。
         var wanted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var sku in ExpandCompositeSkus(skus))
+        foreach (var sku in skus)
         {
             var key = (sku ?? "").Trim();
             if (key.Length == 0 || key.Contains(','))
@@ -182,11 +235,17 @@ public sealed class JoomProductService
 
         var shopNames = await LoadShopNamesAsync(cookieHeader, cancellationToken);
         var currentId = (currentProductId ?? "").Trim();
+        // 店小秘列表有时按变种返回行、其 id 与编辑页商品 id 不一致，只靠 id 排不掉自己，
+        // 会把「当前这个产品」当成占用自己的产品报出来（假阳性）。用产品名再兜一层。
+        var currentName = (currentProductName ?? "").Trim();
         var hits = new ConcurrentBag<JoomSkuOccupancy>();
         var failures = new ConcurrentBag<string>();
         var completed = new ConcurrentBag<string>();
         var seen = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         var incomplete = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        var probes = new ConcurrentBag<JoomDetailProbe>();
+        // 详情兜底预算由全部遍历位置共享：只用于「列表变种表覆盖不全」的商品，
+        // 且按需合并补全，不会因为一个多变种商品而重复消耗。
         var editBudget = EditFallbackBudget;
 
         // 按固定大小分批搜索：单个 searchValue 过大时后端可能截断结果，分批后每批的结果集更小、
@@ -207,6 +266,7 @@ public sealed class JoomProductService
                     searchValue,
                     shopNames,
                     currentId,
+                    currentName,
                     wanted,
                     cookieHeader,
                     hits,
@@ -214,6 +274,7 @@ public sealed class JoomProductService
                     completed,
                     seen,
                     incomplete,
+                    probes,
                     () => Interlocked.Decrement(ref editBudget) >= 0,
                     cancellationToken));
             }
@@ -229,7 +290,6 @@ public sealed class JoomProductService
             if (auth is not null)
                 throw auth;
         }
-
         var failedLocations = failures
             .Distinct(StringComparer.Ordinal)
             .OrderBy(x => x, StringComparer.Ordinal)
@@ -251,7 +311,14 @@ public sealed class JoomProductService
         {
             Hits = ordered,
             FailedLocations = failedLocations,
-            IncompleteReasons = incompleteReasons
+            IncompleteReasons = incompleteReasons,
+            DetailProbes = probes.Count == 0
+                ? []
+                : probes
+                    .Select(p => p.ToDiagnostic())
+                    .Distinct(StringComparer.Ordinal)
+                    .Take(MaxDetailProbes)
+                    .ToList()
         };
     }
 
@@ -260,6 +327,7 @@ public sealed class JoomProductService
         string searchValue,
         IReadOnlyDictionary<string, string> shopNames,
         string currentProductId,
+        string currentProductName,
         Dictionary<string, string> wanted,
         string cookieHeader,
         ConcurrentBag<JoomSkuOccupancy> hits,
@@ -267,6 +335,7 @@ public sealed class JoomProductService
         ConcurrentBag<string> completed,
         ConcurrentDictionary<string, byte> seen,
         ConcurrentDictionary<string, byte> incomplete,
+        ConcurrentBag<JoomDetailProbe> probes,
         Func<bool> tryConsumeEditFallback,
         CancellationToken cancellationToken)
     {
@@ -316,45 +385,113 @@ public sealed class JoomProductService
                         && productId.Equals(currentProductId, StringComparison.OrdinalIgnoreCase))
                         continue;
 
+                    var name = FirstNonEmpty(GetString(item, "name"), GetString(item, "title"));
+                    if (currentProductName.Length > 0
+                        && name.Trim().Equals(currentProductName, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
                     var itemShop = NormalizeShopId(GetString(item, "shopId"));
-                    var visible = ExpandCompositeSkus(ReadVisibleSkus(item));
-                    if (!visible.Any(wanted.ContainsKey))
+                    var (visible, variantSize) = ReadVisibleSkus(item);
+
+                    // 店小秘列表接口只回前几个变种（实测 variantSize=7 时 variants 只有 5 条）。
+                    // 变种被截断时，命中 SKU 可能落在没回来的那部分，只看列表必然漏检，
+                    // 因此这种情况下无条件读详情页取全量变种。
+                    var truncated = variantSize > visible.Count;
+                    var overlapsWanted = visible.Any(wanted.ContainsKey);
+
+                    // 详情兜底只对「可能命中」的商品做：列表已给出待查 SKU、或变种被截断但
+                    // 列表里一个待查 SKU 都没有的商品，读到全量变种也是零命中，不该占用预算。
+                    var detailUnknown = false;
+                    if ((truncated || overlapsWanted) && (truncated || IsDetailNeeded(visible, wanted)))
                     {
+                        var detailFailNote = location.Label + "：部分商品的详情未能读取，" + productId + " 只按列表可见变种核对";
                         if (!tryConsumeEditFallback())
                         {
+                            detailUnknown = true;
                             // 原实现把这句话塞进 failures，伪装成「位置」名并污染后续判断；
                             // 现在单独归入 incomplete，语义与失败位置分开。
                             incomplete.TryAdd(
                                 location.Label + "：部分商品未能核对详情（详情核对预算用尽）", 0);
-                            continue;
                         }
+                        else
+                        {
+                            var (detailed, probed) = await TryReadEditSkusAsync(
+                                productId, cookieHeader, cancellationToken, location.Label, visible, variantSize);
+                            if (detailed.Count == 0)
+                            {
+                                detailUnknown = true;
+                                incomplete.TryAdd(detailFailNote, 0);
+                            }
+                            else
+                            {
+                                // 详情给的是全量变种，合并后仍有待查 SKU 缺失才算没核对完
+                                // （详情本身也可能被裁），否则就是已完整核对。
+                                visible = detailed
+                                    .Concat(visible)
+                                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                                    .ToList();
+                                if (IsDetailNeeded(visible, wanted))
+                                {
+                                    detailUnknown = true;
+                                    incomplete.TryAdd(detailFailNote, 0);
+                                }
+                            }
 
-                        visible = ExpandCompositeSkus(
-                            await TryReadEditSkusAsync(productId, cookieHeader, cancellationToken));
+                            if (probed is not null)
+                                probes.Add(probed);
+                        }
                     }
 
                     var parentSku = GetString(item, "parentSku").Trim();
-                    var name = FirstNonEmpty(GetString(item, "name"), GetString(item, "title"));
                     var resolvedShop = itemShop;
                     var shopName = "";
                     if (resolvedShop is not null && shopNames.TryGetValue(resolvedShop, out var foundShopName))
                         shopName = foundShopName;
-                    foreach (var found in visible)
+
+                    // 一个产品的全部命中一次性报出：键只用「产品 + 位置」，
+                    // 避免同一产品的分页重复回调里，后面的完整变种表被当成另一次占用。
+                    var matched = visible.Where(wanted.ContainsKey).ToList();
+                    if (matched.Count > 0
+                        && seen.TryAdd(productId + "\n" + location.Label, 0))
                     {
-                        if (!wanted.TryGetValue(found, out var displaySku))
-                            continue;
-                        var dedupeKey = displaySku + "\n" + productId + "\n" + location.Label;
-                        if (!seen.TryAdd(dedupeKey, 0))
-                            continue;
-                        hits.Add(new JoomSkuOccupancy
+                        foreach (var found in matched)
                         {
-                            Sku = displaySku,
+                            if (!wanted.TryGetValue(found, out var displaySku))
+                                continue;
+                            hits.Add(new JoomSkuOccupancy
+                            {
+                                Sku = displaySku,
+                                Location = location.Label,
+                                ProductName = name,
+                                ProductId = productId,
+                                EditUrl = BuildEditUrl(productId),
+                                // 详情兜底会合并多个变种，此时 item.parentSku 只是其中一个变种的 SKU，
+                                // 作为 Parent SKU 展示会误导；仅单变种商品才带上。
+                                ParentSku = parentSku.Equals(displaySku, StringComparison.OrdinalIgnoreCase)
+                                            || visible.Count != 1
+                                    ? ""
+                                    : parentSku,
+                                ShopName = shopName
+                            });
+                        }
+                    }
+
+                    // 变种没读全的商品，其余 SKU 是否命中仍是未知：记一条诊断，
+                    // 让界面能说清「为什么没核对完整」，而不是只给一句笼统提示。
+                    if (detailUnknown)
+                    {
+                        var probe = new JoomDetailProbe
+                        {
                             Location = location.Label,
-                            ProductName = name,
                             ProductId = productId,
-                            EditUrl = BuildEditUrl(productId),
-                            ParentSku = parentSku.Equals(displaySku, StringComparison.OrdinalIgnoreCase) ? "" : parentSku,
-                            ShopName = shopName
+                            VisibleCount = visible.Count,
+                            VisibleSample = string.Join("/", visible.Take(6))
+                        };
+                        probes.Add(probe with
+                        {
+                            Error = probe.Error.Length > 0 || probe.BodySample.Length > 0
+                                ? probe.Error
+                                : "未读到完整变种"
                         });
                     }
                 }
@@ -380,15 +517,30 @@ public sealed class JoomProductService
         }
     }
 
-    private async Task<List<string>> TryReadEditSkusAsync(
+    /// <summary>
+    /// 读取编辑页全量变种 SKU。失败时返回诊断信息（probe），用于说明「为什么这个商品没核对完整」。
+    /// </summary>
+    private async Task<(List<string> Skus, JoomDetailProbe? Probe)> TryReadEditSkusAsync(
         string productId,
         string cookieHeader,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string locationLabel,
+        IReadOnlyCollection<string> visible,
+        int listVariantSize)
     {
+        var editUrl = BuildEditUrl(productId);
+        var apiUrl = EditJsonUrl + "?id=" + Uri.EscapeDataString(productId);
+        var probe = new JoomDetailProbe
+        {
+            Location = locationLabel,
+            ProductId = productId,
+            VisibleCount = visible.Count,
+            VisibleSample = string.Join("/", visible.Take(6)),
+            RequestUrl = apiUrl
+        };
+
         try
         {
-            var editUrl = BuildEditUrl(productId);
-            var apiUrl = EditJsonUrl + "?id=" + Uri.EscapeDataString(productId);
             var (status, body) = await _apiClient.SendAsync(
                 "GET",
                 apiUrl,
@@ -397,25 +549,45 @@ public sealed class JoomProductService
                 contentType: "application/json",
                 cancellationToken,
                 referer: editUrl);
+            probe = probe with { HttpStatus = status, BodySample = Truncate(body, 300) };
             if (status is < 200 or >= 300)
-                return [];
+                return ([], probe);
 
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
+            var topKeys = new HashSet<string>(StringComparer.Ordinal);
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in root.EnumerateObject())
+                    topKeys.Add(prop.Name);
+            }
+
             var code = root.TryGetProperty("code", out var codeEl) && codeEl.ValueKind == JsonValueKind.Number
                 ? codeEl.GetInt32()
-                : -1;
-            if (code != 0 || !root.TryGetProperty("data", out var data))
-                return [];
+                : (int?)null;
+            var msg = root.TryGetProperty("msg", out var msgEl) && msgEl.ValueKind == JsonValueKind.String
+                ? msgEl.GetString() ?? ""
+                : "";
+            probe = probe with { Code = code, Message = msg, TopKeys = string.Join(",", topKeys) };
+
+            if (code != 0 || !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+                return ([], probe);
 
             var product = data.TryGetProperty("product", out var productEl) && productEl.ValueKind == JsonValueKind.Object
                 ? productEl
                 : data;
-            return ReadVariants(product);
+            // 详情响应的 variantSize 恒为 0，不能当总数用，这里以实际读到的条数为准。
+            var variants = ReadVariants(product);
+            probe = probe with { VariantCount = variants.Count, VariantSize = listVariantSize };
+            return (variants, variants.Count == 0 ? probe : null);
         }
         catch (JsonException)
         {
-            return [];
+            return ([], probe with { Error = "响应不是合法 JSON" });
+        }
+        catch (Exception ex) when (!CookieErrorDetector.IsAuthFailure(ex.Message))
+        {
+            return ([], probe with { Error = Truncate(ex.Message, 200) });
         }
     }
 
@@ -497,7 +669,12 @@ public sealed class JoomProductService
         return true;
     }
 
-    private static List<string> ReadVisibleSkus(JsonElement item)
+    /// <summary>
+    /// 读列表行的可见变种 SKU，并带上该商品声明的变种总数。
+    /// 店小秘列表接口只回前几个变种，<c>variantSize</c> 才是总数（实测 7 个变种只回 5 条），
+    /// 用它判断「列表给的变种表是否被截断」。
+    /// </summary>
+    private static (List<string> Skus, int VariantSize) ReadVisibleSkus(JsonElement item)
     {
         var list = new List<string>();
         if (item.TryGetProperty("variants", out var variants) && variants.ValueKind == JsonValueKind.Array)
@@ -516,35 +693,36 @@ public sealed class JoomProductService
             list.AddRange(ParseSkuJson(jsonEl.GetString()));
         }
 
+        var skuCount = list.Count;
         var ownSku = GetString(item, "sku").Trim();
         if (ownSku.Length > 0)
             list.Add(ownSku);
         var parentSku = GetString(item, "parentSku").Trim();
         if (parentSku.Length > 0)
             list.Add(parentSku);
-        return list;
+
+        var variantSize = GetInt(item, "variantSize") ?? 0;
+        return (list, Math.Max(variantSize, skuCount));
     }
 
     /// <summary>
-    /// 店小秘部分列表会把多个变种 SKU 合并为「SKU1+SKU2+…」返回。
-    /// 占用检测按每个组成 SKU 精确比较，同时兼容普通单 SKU。
+    /// 列表返回的变种表是否还缺少待查 SKU。缺少就必须读详情页补全，
+    /// 否则「部分命中」会被误当成已核对，导致其余 SKU 漏检。
     /// </summary>
-    private static List<string> ExpandCompositeSkus(IEnumerable<string> values)
+    private static bool IsDetailNeeded(
+        IReadOnlyCollection<string> visible,
+        IReadOnlyDictionary<string, string> wanted)
     {
-        var result = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var value in values)
+        if (visible.Count == 0)
+            return wanted.Count > 0;
+
+        foreach (var sku in wanted.Keys)
         {
-            foreach (var part in (value ?? "").Split(
-                         '+',
-                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                if (part.Length > 0 && seen.Add(part))
-                    result.Add(part);
-            }
+            if (!visible.Contains(sku, StringComparer.OrdinalIgnoreCase))
+                return true;
         }
 
-        return result;
+        return false;
     }
 
     private static List<string> ParseSkuJson(string? json)

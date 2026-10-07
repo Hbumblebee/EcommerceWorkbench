@@ -17,6 +17,7 @@
  *           2026-10-02 整页、重复区与表格统一采用短距离缓动滚动
  *           2026-10-02 建议 SKU 改为表格展示，由用户一键应用或恢复原 SKU
  *           2026-10-02 读取详情页后搜索 SKU 默认去除原后缀
+ *           2026-10-04 未完整核对原因改为逐商品列出并只展示前 5 条
  */
 
 using System.Collections.ObjectModel;
@@ -53,11 +54,18 @@ public partial class JoomPricingView : UserControl
     private int _occupancyWindowSeq;
     private string? _openedEditUrl;
     private string? _openedProductId;
+    /// <summary>当前打开产品的名称，用于兜底排除「自己」（列表 id 与编辑页 id 不一致时）。</summary>
+    private string? _openedProductName;
     private readonly ObservableCollection<OccupancySkuGroup> _occupancies = [];
+    /// <summary>详情核对失败的诊断行，仅用于界面展示与复制排查。</summary>
+    private readonly ObservableCollection<string> _detailProbes = [];
     private readonly SemaphoreSlim _suggestLock = new(1, 1);
     private readonly Dictionary<string, int> _suggestTokens = new(StringComparer.OrdinalIgnoreCase);
     private int _suggestGeneration;
     private bool _suppressSuggestion;
+    /// <summary>本轮建议 SKU 实际核对过的候选；写回前先用它复检，避免把未核对过的 SKU 推到线上。</summary>
+    private HashSet<string> _verifiedSkus = new(StringComparer.OrdinalIgnoreCase);
+    private string? _verifyGap;
 
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<string>? CountChanged;
@@ -72,6 +80,7 @@ public partial class JoomPricingView : UserControl
         _productSearch = new ProductSearchService(_apiClient);
         PricingGrid.ItemsSource = _rows;
         OccupancyList.ItemsSource = _occupancies;
+        DetailProbeList.ItemsSource = _detailProbes;
         Loaded += JoomPricingView_Loaded;
     }
 
@@ -322,6 +331,7 @@ public partial class JoomPricingView : UserControl
             LoadUniqueSkus(detail);
             _openedEditUrl = editUrl;
             _openedProductId = detail.Id;
+            _openedProductName = string.IsNullOrWhiteSpace(detail.Name) ? null : detail.Name.Trim();
             var name = string.IsNullOrWhiteSpace(detail.Name) ? "" : "「" + detail.Name + "」";
             var loaded = $"已读取{name}变种 SKU {detail.UniqueSkus.Count} 个（已去重）。";
             try
@@ -775,7 +785,14 @@ public partial class JoomPricingView : UserControl
             return "未检查 SKU 占用。";
 
         SetStatus($"正在检查 {skus.Count} 个 SKU 是否已被各店铺的 JOOM 产品占用…");
-        var report = await _joomProduct.FindOccupanciesAsync(skus, _openedProductId, cookieHeader);
+        var report = await _joomProduct.FindOccupanciesAsync(
+            skus,
+            _openedProductId,
+            cookieHeader,
+            currentProductName: _openedProductName);
+        FillDetailProbes(report);
+
+        // 命中以完整 SKU 为单位（组合货号 J0071-1+J0043-1 整体算一个），按 SKU 分组展示占用详情。
         var groups = new Dictionary<string, OccupancySkuGroup>(StringComparer.OrdinalIgnoreCase);
         foreach (var hit in report.Hits)
         {
@@ -833,9 +850,18 @@ public partial class JoomPricingView : UserControl
         var failed = report.FailedLocations.Count == 0
             ? ""
             : " 以下范围未完整核对：" + string.Join("、", report.FailedLocations) + "。";
-        var incomplete = report.IncompleteReasons.Count == 0
+        // 逐商品记录未核对原因后条数可能很多，状态栏只展示前几条，避免把结论淹没。
+        const int incompleteShown = 5;
+        var incompleteList = report.IncompleteReasons;
+        var incomplete = incompleteList.Count == 0
             ? ""
-            : " 以下内容未完整核对：" + string.Join("、", report.IncompleteReasons) + "。";
+            : " 以下内容未完整核对：" + string.Join(
+                "、",
+                incompleteList.Take(incompleteShown))
+              + (incompleteList.Count > incompleteShown
+                  ? "…（共 " + incompleteList.Count + " 条）"
+                  : "")
+              + "。";
         if (_occupancies.Count == 0)
         {
             var claim = failed.Length == 0 && incomplete.Length == 0
@@ -856,10 +882,38 @@ public partial class JoomPricingView : UserControl
         _suggestGeneration++;
         _suggestTokens.Clear();
         _occupancies.Clear();
+        _detailProbes.Clear();
+        _verifiedSkus.Clear();
+        _verifyGap = null;
+        DetailProbeExpander.Visibility = Visibility.Collapsed;
         foreach (var row in _rows)
             row.SuggestedSku = null;
         OccupancyTitle.Text = "";
         OccupancyPanel.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>把「详情读不到变种」的诊断挂到界面上，便于直接复制排查。</summary>
+    private void FillDetailProbes(JoomSkuOccupancyReport report)
+    {
+        _detailProbes.Clear();
+        foreach (var probe in report.DetailProbes)
+            _detailProbes.Add(probe);
+        DetailProbeExpander.Visibility = _detailProbes.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void CopyDetailProbes_Click(object sender, RoutedEventArgs e)
+    {
+        if (_detailProbes.Count == 0)
+            return;
+        try
+        {
+            Clipboard.SetText(string.Join(Environment.NewLine, _detailProbes));
+            SetStatus($"已复制 {_detailProbes.Count} 条详情核对诊断。");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"复制诊断失败：{ex.Message}");
+        }
     }
 
     private List<string> CollectOccupancySkus()
@@ -1002,13 +1056,15 @@ public partial class JoomPricingView : UserControl
                 return;
 
             var occupied = report.Hits.Any(hit => hit.Sku.Equals(sku, StringComparison.OrdinalIgnoreCase));
-            var fullyChecked = report.FailedLocations.Count == 0 && report.IncompleteReasons.Count == 0;
-            group.SuggestionAvailable = !occupied && fullyChecked;
+            // 未核对完不再否决用户手填/手选的结果（那会让人以为自己的输入无效），
+            // 只降级提示；写回详情页前还会再做一次复检。
+            var gap = BuildVerifyGap(report);
+            group.SuggestionAvailable = !occupied;
             group.SuggestStatus = occupied
                 ? "修改后的 SKU 仍会产品重复"
-                : fullyChecked
+                : gap is null
                     ? "修改后的 SKU 未被占用"
-                    : "部分范围未完成核对，暂不替换详情页";
+                    : "未发现占用，但部分范围未核对完：" + gap;
             RefreshSuggestedSkuColumn();
         }
         catch (Exception ex)
@@ -1106,6 +1162,10 @@ public partial class JoomPricingView : UserControl
             }
 
             var reserved = CollectReservedSkus(pending);
+            // 候选 SKU 的核对结果：只有一个都不缺才敢说「未被占用」，
+            // 缺范围时仍然给出建议，但状态说明和写回前复检都会降级为「未核对」。
+            var checkedCandidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string? verifyGap = null;
             for (var i = 0; i < general.Count && pending.Count > 0; i++)
             {
                 pending = pending.Where(group => IsSuggestionCurrent(group, tokens, generation)).ToList();
@@ -1145,16 +1205,16 @@ public partial class JoomPricingView : UserControl
                     var report = await _joomProduct.FindOccupanciesAsync(
                         batch.Select(item => item.Candidate).ToList(),
                         _openedProductId,
-                        cookieHeader);
+                        cookieHeader,
+                        currentProductName: _openedProductName);
                     if (generation != _suggestGeneration)
                         return;
-                    if (report.FailedLocations.Count > 0 || report.IncompleteReasons.Count > 0)
-                    {
-                        throw new InvalidOperationException(
-                            "候选 SKU 未完成全部范围核对："
-                            + string.Join("、", report.FailedLocations.Concat(report.IncompleteReasons)));
-                    }
 
+                    // 核对缺口不再直接抛异常：那会把已经找到的建议一起废掉。
+                    // 缺口只降低「可一键应用」的可信度，确证被占用仍然照常跳过。
+                    verifyGap ??= BuildVerifyGap(report);
+                    foreach (var item in batch)
+                        checkedCandidates.Add(item.Candidate);
                     foreach (var hit in report.Hits)
                         occupied.Add(hit.Sku);
                 }
@@ -1182,7 +1242,11 @@ public partial class JoomPricingView : UserControl
                         continue;
                     }
 
-                    SetSuggestion(group, candidate, "该后缀未被占用", available: true);
+                    SetSuggestion(
+                        group,
+                        candidate,
+                        verifyGap is null ? "该后缀未被占用" : "该后缀未发现占用（部分范围未核对完）",
+                        available: true);
                 }
 
                 pending = still;
@@ -1192,15 +1256,36 @@ public partial class JoomPricingView : UserControl
             {
                 if (!IsSuggestionCurrent(group, tokens, generation) || group.SuggestionUserEdited)
                     continue;
-                SetSuggestion(group, "", "这些后缀都会产品重复，请改后缀或手动填写");
+                SetSuggestion(
+                    group,
+                    "",
+                    verifyGap is null
+                        ? "这些后缀都会产品重复，请改后缀或手动填写"
+                        : "这些后缀未发现占用，但部分范围未核对完：" + verifyGap);
             }
 
+            _verifiedSkus = checkedCandidates;
+            _verifyGap = verifyGap;
             RefreshSuggestedSkuColumn();
         }
         finally
         {
             _suggestLock.Release();
         }
+    }
+
+    /// <summary>把未完整核对的范围压成一句提示，没有缺口时返回 null。</summary>
+    private static string? BuildVerifyGap(JoomSkuOccupancyReport report)
+    {
+        if (report.FailedLocations.Count == 0 && report.IncompleteReasons.Count == 0)
+            return null;
+
+        var parts = report.FailedLocations
+            .Concat(report.IncompleteReasons)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var shown = string.Join("、", parts.Take(3));
+        return parts.Count > 3 ? shown + " 等 " + parts.Count + " 处" : shown;
     }
 
     private async Task<JoomSkuOccupancyReport> QueryOccupancyAsync(IReadOnlyList<string> skus, int generation)
@@ -1215,7 +1300,11 @@ public partial class JoomPricingView : UserControl
             if (string.IsNullOrWhiteSpace(cookieHeader))
                 throw new InvalidOperationException("请先导出 Cookie。");
 
-            return await _joomProduct.FindOccupanciesAsync(skus, _openedProductId, cookieHeader);
+            return await _joomProduct.FindOccupanciesAsync(
+                skus,
+                _openedProductId,
+                cookieHeader,
+                currentProductName: _openedProductName);
         }
         finally
         {
@@ -1369,6 +1458,56 @@ public partial class JoomPricingView : UserControl
         try
         {
             SetStatus(restoreOriginal ? "正在恢复详情页原 SKU…" : "正在应用建议 SKU 到详情页…");
+
+            // 建议 SKU 可能是在候选核对有缺口时给出的，也可能给出后被别的产品用掉了。
+            // 写回详情页是不可逆动作，这里在改线上数据前先复检一次。
+            if (!restoreOriginal)
+            {
+                var targets = changes
+                    .Select(change => change.To)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var uncheckedTargets = targets
+                    .Where(sku => !_verifiedSkus.Contains(sku))
+                    .ToList();
+                if (uncheckedTargets.Count > 0)
+                {
+                    var confirm = await _joomProduct.FindOccupanciesAsync(
+                        uncheckedTargets,
+                        _openedProductId,
+                        GetCookieHeader(),
+                        currentProductName: _openedProductName);
+                    var occupied = confirm.Hits
+                        .Select(hit => hit.Sku)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(sku => sku, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    var unconfirmed = uncheckedTargets
+                        .Where(sku => !occupied.Contains(sku, StringComparer.OrdinalIgnoreCase))
+                        .ToList();
+                    if (occupied.Count > 0 || unconfirmed.Count > 0)
+                    {
+                        var detail = (occupied.Count == 0 ? "" : "\n已被占用：" + string.Join("、", occupied))
+                                     + (unconfirmed.Count == 0 ? "" : "\n仍未核对完：" + string.Join("、", unconfirmed))
+                                     + (confirm.FailedLocations.Count == 0 && confirm.IncompleteReasons.Count == 0
+                                         ? ""
+                                         : "\n未核对范围：" + string.Join(
+                                             "、",
+                                             confirm.FailedLocations
+                                                 .Concat(confirm.IncompleteReasons)
+                                                 .Distinct(StringComparer.Ordinal)
+                                                 .Take(3)));
+                        SetStatus("写回前复检未通过，已取消应用建议 SKU。");
+                        MessageBox.Show(
+                            "写回前复检未通过，已取消应用，详情页未被修改。" + detail,
+                            "应用新SKU",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                        return;
+                    }
+                }
+            }
+
             await OpenProductWindowAsync(new Uri(editUrl), cookies, reload: false);
             var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var change in changes)
