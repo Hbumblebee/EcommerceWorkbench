@@ -47,6 +47,13 @@ public partial class Smt7PricingView : UserControl
     private bool _suppressAutoCalc;
     private bool _loaded;
     private bool _busy;
+
+    /// <summary>文字类滚动区一行的估算高度（像素），用于把滚轮格数换算成距离。</summary>
+    private const double PageLinePixels = 20;
+
+    /// <summary>DataGrid 内部 ScrollViewer 的模板部件名。</summary>
+    private const string GridScrollViewerName = "DG_ScrollViewer";
+
     private Smt7ProductPageWindow? _productWindow;
     private string? _openedEditUrl;
     private string? _openedProductId;
@@ -81,25 +88,45 @@ public partial class Smt7PricingView : UserControl
     }
 
     /// <summary>
-    /// 统一接管滚轮：优先滚动鼠标所在的重复区或表格，到边界后平滑交给整页。
-    /// 与 JOOM 页同一套做法。
+    /// 统一接管滚轮：优先滚动鼠标所在的重复区、诊断列表或表格，到边界后平滑交给整页。
+    /// 每格距离按容器类型换算：表格按行高，文字区按一行约 20px。与 JOOM 页同一套做法。
     /// </summary>
     private void PageScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
         ScrollViewer target = PageScroll;
+        var unitPixels = PageLinePixels;
+
         if (OccupancyScroll.IsMouseOver && SmoothScrollHelper.CanScroll(OccupancyScroll, e.Delta))
         {
             target = OccupancyScroll;
         }
-        else if (PricingGrid.IsMouseOver)
+        else if (DetailProbeList.IsMouseOver
+                 && TryGetInnerScroll(DetailProbeList, name: "", out var probeScroll)
+                 && SmoothScrollHelper.CanScroll(probeScroll, e.Delta))
         {
-            var gridScroll = FindVisualChild<ScrollViewer>(PricingGrid, "DG_ScrollViewer");
-            if (gridScroll is not null && SmoothScrollHelper.CanScroll(gridScroll, e.Delta))
-                target = gridScroll;
+            target = probeScroll;
+        }
+        else if (PricingGrid.IsMouseOver
+                 && TryGetInnerScroll(PricingGrid, GridScrollViewerName, out var gridScroll)
+                 && SmoothScrollHelper.CanScroll(gridScroll, e.Delta))
+        {
+            target = gridScroll;
+            unitPixels = GridRowPixels();
         }
 
-        SmoothScrollHelper.ScrollWheel(target, e.Delta);
+        SmoothScrollHelper.ScrollWheel(target, e.Delta, SmoothScrollHelper.ResolveWheelStep(unitPixels));
         e.Handled = true;
+    }
+
+    private double GridRowPixels()
+        => double.IsFinite(PricingGrid.RowHeight) && PricingGrid.RowHeight > 0
+            ? PricingGrid.RowHeight
+            : PageLinePixels;
+
+    private static bool TryGetInnerScroll(DependencyObject host, string name, out ScrollViewer scroll)
+    {
+        scroll = FindVisualChild<ScrollViewer>(host, name)!;
+        return scroll is not null;
     }
 
     private static T? FindVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement

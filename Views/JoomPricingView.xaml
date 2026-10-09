@@ -467,6 +467,7 @@
                         </Expander.Header>
                         <ListBox x:Name="DetailProbeList"
                                  MaxHeight="150"
+                                 ScrollViewer.CanContentScroll="False"
                                  Background="Transparent"
                                  BorderThickness="0"
                                  Foreground="#7F1D1D"
@@ -506,6 +507,8 @@
                       AlternatingRowBackground="#FAFBFD"
                       BorderThickness="0"
                       EnableRowVirtualization="True"
+                      ScrollViewer.CanContentScroll="True"
+                      VirtualizingPanel.ScrollUnit="Pixel"
                       SelectionUnit="Cell"
                       SelectionMode="Extended"
                       CellEditEnding="PricingGrid_CellEditEnding">
