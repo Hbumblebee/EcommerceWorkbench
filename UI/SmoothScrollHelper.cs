@@ -7,6 +7,7 @@
  *              动画结束时会先回落到基准值再由回调跳到目标，产生可见回弹与顿挫；
  *              每格距离改由 SystemParameters.WheelScrollLines 换算，并限制单帧最大位移，
  *              避免连续滚轮时画面飞掠；静止后清理状态，避免静态字典随控件累积
+ *   2026-10-09 手感调慢：每格封顶 2 行、时间常数 75ms→110ms、单帧限速 40→24px
  */
 
 using System.Windows;
@@ -18,10 +19,16 @@ namespace EcommerceWorkbench.UI;
 public static class SmoothScrollHelper
 {
     /// <summary>逼近目标的时间常数（秒）。越小越跟手，越大越柔和。</summary>
-    private const double TimeConstantSeconds = 0.075;
+    private const double TimeConstantSeconds = 0.11;
 
     /// <summary>单帧最大位移（像素）。限制最高速度，避免连续滚轮时文字飞掠导致看不清。</summary>
-    private const double MaxPixelsPerFrame = 40;
+    private const double MaxPixelsPerFrame = 24;
+
+    /// <summary>
+    /// 每格滚轮最多滚动的行数。系统默认 3 行，本工作台表格行高、文字密集，
+    /// 一格 3 行会跟不住阅读位置；这里封顶为 2 行，用户若把系统设得更少则尊重其设置。
+    /// </summary>
+    private const int MaxLinesPerNotch = 2;
 
     private const double SnapEpsilon = 0.5;
     private const double DefaultFrameSeconds = 1.0 / 60.0;
@@ -34,13 +41,16 @@ public static class SmoothScrollHelper
     private static TimeSpan _lastFrameTime;
 
     /// <summary>
-    /// 把系统设置里「每次滚动的行数」换算成像素；值为 0 或 -1（翻页）时按 Windows 默认的 3 行处理。
+    /// 把系统设置里「每次滚动的行数」换算成像素，并按 <see cref="MaxLinesPerNotch"/> 封顶；
+    /// 值为 0 或 -1（翻页）时按 Windows 默认的 3 行处理。
     /// </summary>
     public static double ResolveWheelStep(double unitPixels)
     {
         var lines = SystemParameters.WheelScrollLines;
         if (lines <= 0)
             lines = 3;
+
+        lines = Math.Min(lines, MaxLinesPerNotch);
 
         var unit = double.IsFinite(unitPixels) && unitPixels > 0 ? unitPixels : 20;
         return unit * lines;
