@@ -424,17 +424,17 @@
                 </Expander>
                 <Border x:Name="OccupancyPanel"
                         Visibility="Collapsed"
-                        Background="#FEF2F2"
-                        BorderBrush="#FECACA"
+                        Background="#FFFBEB"
+                        BorderBrush="#FDE68A"
                         BorderThickness="1"
                         CornerRadius="6"
                         Padding="10,8"
                         Margin="0,8,0,0">
                     <StackPanel>
-                        <Expander x:Name="OccupancyExpander" IsExpanded="True" Foreground="#B91C1C">
+                        <Expander x:Name="OccupancyExpander" IsExpanded="True" Foreground="#92400E">
                             <Expander.Header>
                                 <TextBlock x:Name="OccupancyTitle"
-                                           Foreground="#B91C1C"
+                                           Foreground="#92400E"
                                            FontWeight="Bold"
                                            TextWrapping="Wrap"/>
                             </Expander.Header>
@@ -446,18 +446,18 @@
                                 <ItemsControl x:Name="OccupancyList">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border BorderBrush="#FECACA" BorderThickness="0,0,0,1" Padding="0,6,0,6">
+                                            <Border BorderBrush="#FDE68A" BorderThickness="0,0,0,1" Padding="0,6,0,6">
                                                 <StackPanel>
                                                     <WrapPanel VerticalAlignment="Center">
                                                         <TextBlock Text="{Binding Sku}"
                                                                    FontWeight="Bold"
-                                                                   Foreground="#7F1D1D"
+                                                                   Foreground="#78350F"
                                                                    VerticalAlignment="Center"
                                                                    Margin="0,0,10,4"
                                                                    ToolTip="{Binding BaseHint}"/>
                                                         <TextBlock Text="建议SKU"
                                                                    VerticalAlignment="Center"
-                                                                   Foreground="#7F1D1D"
+                                                                   Foreground="#78350F"
                                                                    Margin="0,0,6,4"/>
                                                         <TextBox Text="{Binding SuggestedSku, UpdateSourceTrigger=PropertyChanged}"
                                                                  MinWidth="160"
@@ -470,20 +470,20 @@
                                                                  LostFocus="SuggestedSku_LostFocus"/>
                                                         <TextBlock Text="{Binding SuggestStatus}"
                                                                    VerticalAlignment="Center"
-                                                                   Foreground="#9A3412"
+                                                                   Foreground="#A16207"
                                                                    Margin="0,0,0,4"
                                                                    TextWrapping="Wrap"/>
                                                     </WrapPanel>
                                                     <WrapPanel VerticalAlignment="Center">
                                                         <CheckBox Content="启用颜色后缀"
-                                                                  Foreground="#7F1D1D"
+                                                                  Foreground="#78350F"
                                                                   VerticalAlignment="Center"
                                                                   Margin="0,0,8,4"
                                                                   IsChecked="{Binding UseColorSuffix, Mode=TwoWay}"
                                                                   Checked="UseColorSuffix_Changed"
                                                                   Unchecked="UseColorSuffix_Changed"/>
                                                         <TextBlock Text="（组合 SKU 每一段各选一个颜色，按原顺序拼回）"
-                                                                   Foreground="#9A3412"
+                                                                   Foreground="#A16207"
                                                                    FontSize="11"
                                                                    VerticalAlignment="Center"
                                                                    Margin="0,0,0,4">
@@ -518,7 +518,7 @@
                                                             <DataTemplate>
                                                                 <WrapPanel VerticalAlignment="Center" Margin="0,0,0,4">
                                                                     <TextBlock Text="{Binding Label}"
-                                                                               Foreground="#7F1D1D"
+                                                                               Foreground="#78350F"
                                                                                VerticalAlignment="Center"
                                                                                Margin="0,0,6,0"
                                                                                ToolTip="该段基础货号：会与所选颜色、查重后缀拼成这一段"/>
@@ -547,7 +547,7 @@
                                                         <ItemsControl.ItemTemplate>
                                                             <DataTemplate>
                                                                 <TextBlock Margin="12,2,0,2" TextWrapping="Wrap">
-                                                                    <Run Text="{Binding Summary}" Foreground="#7F1D1D"/>
+                                                                    <Run Text="{Binding Summary}" Foreground="#78350F"/>
                                                                     <Run Text="  "/>
                                                                     <Hyperlink Click="OccupancyLink_Click"
                                                                                Tag="{Binding EditUrl}"
@@ -566,11 +566,11 @@
                         <Expander x:Name="DetailProbeExpander"
                                   Visibility="Collapsed"
                                   Margin="0,6,0,0"
-                                  Foreground="#7F1D1D">
+                                  Foreground="#78350F">
                             <Expander.Header>
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="详情核对失败诊断"
-                                               Foreground="#7F1D1D"
+                                               Foreground="#78350F"
                                                FontWeight="Bold"
                                                VerticalAlignment="Center"/>
                                     <Button Content="复制"
@@ -586,7 +586,7 @@
                                      ScrollViewer.CanContentScroll="False"
                                      Background="Transparent"
                                      BorderThickness="0"
-                                     Foreground="#7F1D1D"
+                                     Foreground="#78350F"
                                      FontSize="11"
                                      HorizontalContentAlignment="Stretch">
                                 <ListBox.ItemTemplate>
@@ -622,7 +622,6 @@
                       BorderThickness="0"
                       EnableRowVirtualization="True"
                       ScrollViewer.CanContentScroll="True"
-                      VirtualizingPanel.ScrollUnit="Pixel"
                       SelectionUnit="Cell"
                       SelectionMode="Extended"
                       CellEditEnding="PricingGrid_CellEditEnding">
