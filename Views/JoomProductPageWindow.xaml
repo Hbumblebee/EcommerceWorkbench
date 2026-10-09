@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="JOOM 产品详情页"
+        Icon="Assets/app.ico"
         Height="860"
         Width="1280"
         MinHeight="560"

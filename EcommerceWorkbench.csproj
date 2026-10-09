@@ -11,6 +11,7 @@
     <AssemblyName>EcommerceWorkbench</AssemblyName>
     <Product>店小秘 × Shopee 定价工作台</Product>
     <Version>1.0.0</Version>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
@@ -21,6 +22,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Data\tw-711-rates.json" LogicalName="EcommerceWorkbench.Data.tw-711-rates.json" />
+    <!-- 窗口图标：与 exe 图标同一枚，供各 Window 的 Icon 属性引用 -->
+    <Resource Include="Assets\app.ico" />
   </ItemGroup>
 
 </Project>

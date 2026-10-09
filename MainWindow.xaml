@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:EcommerceWorkbench.Views"
         Title="电商定价工作台"
+        Icon="Assets/app.ico"
         Height="900"
         Width="1480"
         MinHeight="720"
