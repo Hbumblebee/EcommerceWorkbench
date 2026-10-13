@@ -3,6 +3,7 @@
  * 创建日期：2026-09-13
  * 更新日期：2026-09-13 读取货品条码与 packageWeight，供按条码匹配重量
  * 修改记录：2026-10-03 注入层契约自检（探测 smtChoiceSkuDataStore 是否存在）+ 写后回读验证（Verified）
+ *           2026-10-13 窗口图标改为程序根路径，避免在 Views 目录下找不到 app.ico
  */
 
 using System.Globalization;

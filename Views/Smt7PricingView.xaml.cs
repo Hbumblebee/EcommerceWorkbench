@@ -8,6 +8,8 @@
  *           2026-10-07 查重范围/店铺可选；查重后缀独立可编辑
  *           2026-10-07 查重面板与 JOOM 对齐：启用颜色后缀后组合 SKU 逐段选色，按原顺序拼回
  *           2026-10-08 页面排布与滚动对齐 JOOM：整页 ScrollViewer + 表格/重复区到边界后交给整页
+ *           2026-10-12 启用颜色后缀时，没选颜色的段不加颜色，仍生成 SKU 建议
+ *           2026-10-12 复合且重复、且某段带颜色时自动启用颜色后缀
  */
 
 using System.Collections.ObjectModel;
@@ -20,6 +22,7 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using EcommerceWorkbench.Models;
 using EcommerceWorkbench.Services;
 using EcommerceWorkbench.Services.Dianxiaomi;
@@ -1370,7 +1373,7 @@ public partial class Smt7PricingView : UserControl
                         JoomSkuSuffix.StripCompositeTrailingSuffix(hit.Sku, OccupancySuffixes)));
                 groups[hit.Sku] = group;
                 _occupancies.Add(group);
-                if (UseOccupancyColorSuffix)
+                if (UseOccupancyColorSuffix || group.ShouldAutoEnableColorSuffix)
                     group.UseColorSuffix = true;
             }
 
@@ -1418,14 +1421,18 @@ public partial class Smt7PricingView : UserControl
         OccupancyTitle.Text = _occupancies.Count + " 个 SKU 已被本店铺产品占用，直接发布可能提示重复";
         OccupancyExpander.IsExpanded = true;
         OccupancyPanel.Visibility = Visibility.Visible;
+        // 复合且重复、并且有段还带着颜色时自动启用，不必等用户勾选。
+        // 勾选框要等界面生成后才会同步，这段时间先挡住事件，避免把自动启用写进设置或重复查重。
         _loadingColorOptions = true;
         try
         {
             foreach (var group in _occupancies)
             {
-                group.UseColorSuffix = UseOccupancyColorSuffix;
+                group.UseColorSuffix = group.ShouldAutoEnableColorSuffix || UseOccupancyColorSuffix;
                 group.LoadColorOptions(OccupancyColors);
             }
+
+            await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.ContextIdle);
         }
         finally
         {
@@ -1508,7 +1515,8 @@ public partial class Smt7PricingView : UserControl
     }
 
     /// <summary>
-    /// 为被占用的 SKU 找可用后缀：去掉末尾通用后缀后按顺序拼后缀，
+    /// 为被占用的 SKU 找可用后缀：去掉末尾通用后缀后按顺序拼后缀。
+    /// 启用颜色时，已选颜色的段先接颜色；没选的段不加颜色。
     /// 逐个用「当前店铺」复核，跳过仍被占用或与本产品其它 SKU 冲突的结果。
     /// </summary>
     private async Task FillSuggestedSkusAsync(IReadOnlyList<Smt7OccupancyGroup> targets)
@@ -1524,12 +1532,6 @@ public partial class Smt7PricingView : UserControl
             if (general.Count == 0)
             {
                 group.SuggestStatus = "请先填写「查重后缀（产品重复时使用）」";
-                continue;
-            }
-
-            if (group.NeedsColorSelection)
-            {
-                group.SuggestStatus = "请为每一段选择颜色后缀";
                 continue;
             }
 
@@ -1556,7 +1558,7 @@ public partial class Smt7PricingView : UserControl
             var waiting = new List<Smt7OccupancyGroup>();
             foreach (var group in pending)
             {
-                // 每一段各自拼「该段基础货号 + 该段颜色 + 查重后缀」，再按原组合顺序连回一个 SKU。
+                // 每一段拼「该段基础货号 + 已选颜色（没选则不加）+ 查重后缀」，再按原组合顺序连回一个 SKU。
                 var candidate = group.BuildCandidate(general[i]);
                 // 原 SKU 已以该后缀结尾时（常见于查重后缀列表为空）再拼一次会得到 E0258-1-1，
                 // 这种候选直接跳过，等下一个后缀；拼回原值也没有意义，同样跳过。
@@ -1901,6 +1903,12 @@ public partial class Smt7PricingView : UserControl
 
         public bool HasMultipleParts => Parts.Count > 1;
 
+        /// <summary>
+        /// 复合且重复的 SKU（本组只在查到占用时创建），只要有一段去掉查重后缀后还带着颜色，就自动启用颜色后缀。
+        /// </summary>
+        public bool ShouldAutoEnableColorSuffix =>
+            HasMultipleParts && Parts.Any(part => part.OriginalColorSuffix.Length > 0);
+
         public string BaseHint =>
             string.Equals(BaseSku, Sku, StringComparison.Ordinal)
                 ? "该 SKU 没有可去掉的末尾后缀，将直接在每段末尾拼接。"
@@ -1915,13 +1923,8 @@ public partial class Smt7PricingView : UserControl
                     return;
                 _useColorSuffix = value;
                 OnPropertyChanged(nameof(UseColorSuffix));
-                OnPropertyChanged(nameof(NeedsColorSelection));
             }
         }
-
-        /// <summary>启用了颜色后缀但还有段没选颜色。</summary>
-        public bool NeedsColorSelection =>
-            UseColorSuffix && Parts.Any(part => string.IsNullOrWhiteSpace(part.SelectedColor));
 
         public string SuggestedSku
         {
@@ -1958,12 +1961,10 @@ public partial class Smt7PricingView : UserControl
                     part.SelectedColor = part.OriginalColorSuffix;
                 }
             }
-
-            OnPropertyChanged(nameof(NeedsColorSelection));
         }
 
         /// <summary>
-        /// 按段拼出候选 SKU：每段 = 该段基础货号 + 该段颜色后缀 + 查重后缀，
+        /// 按段拼出候选 SKU：每段 = 该段基础货号 + 已选颜色（没选则不加）+ 查重后缀，
         /// 拼好后按原组合顺序用「+」连回一个完整 SKU。
         /// </summary>
         public string BuildCandidate(string occupancySuffix)
@@ -1971,11 +1972,9 @@ public partial class Smt7PricingView : UserControl
             return string.Join("+", Parts.Select(part =>
                 JoomSkuSuffix.Combine(
                     part.BaseSku,
-                    UseColorSuffix ? part.SelectedColor : null,
+                    UseColorSuffix && !string.IsNullOrWhiteSpace(part.SelectedColor) ? part.SelectedColor : null,
                     occupancySuffix)));
         }
-
-        public void NotifyPartsChanged() => OnPropertyChanged(nameof(NeedsColorSelection));
 
         private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
         {
@@ -2022,7 +2021,6 @@ public partial class Smt7PricingView : UserControl
                     return;
                 _selectedColor = value;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedColor)));
-                Owner.NotifyPartsChanged();
             }
         }
     }

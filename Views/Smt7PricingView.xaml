@@ -392,7 +392,7 @@
                                    Foreground="{StaticResource MutedBrush}"/>
                     </Expander.Header>
                     <StackPanel Margin="0,6,0,0">
-                        <TextBlock Text="中英文逗号均可。「搜索SKU」打开详情页时去掉末尾的通用后缀、保留颜色；查重发现重复时，再按顺序拼接通用后缀生成新 SKU（启用颜色后缀则每段各选一个颜色）。"
+                        <TextBlock Text="中英文逗号均可。「搜索SKU」打开详情页时去掉末尾的通用后缀、保留颜色；查重发现重复时，再按顺序拼接通用后缀生成新 SKU。复合且重复、且某段带原颜色时会自动启用颜色后缀：对上颜色列表的段先拼颜色，没对上的段不加颜色。"
                                    Foreground="{StaticResource MutedBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,0,0,6"/>
@@ -417,7 +417,7 @@
                                        Foreground="{StaticResource TextBrush}"/>
                             <TextBox x:Name="ColorSuffixBox"
                                      VerticalContentAlignment="Center"
-                                     ToolTip="中英文逗号分隔。查重时启用颜色后缀后，组合 SKU 的每一段各选一个颜色"
+                                     ToolTip="中英文逗号分隔。查重时启用颜色后缀后，选了颜色的段先拼颜色，没选的段不加颜色"
                                      LostFocus="ColorSuffixBox_LostFocus"/>
                         </DockPanel>
                     </StackPanel>
@@ -482,7 +482,7 @@
                                                                   IsChecked="{Binding UseColorSuffix, Mode=TwoWay}"
                                                                   Checked="UseColorSuffix_Changed"
                                                                   Unchecked="UseColorSuffix_Changed"/>
-                                                        <TextBlock Text="（组合 SKU 每一段各选一个颜色，按原顺序拼回）"
+                                                        <TextBlock Text="（复合且重复时，带原颜色的段会自动启用；没对上的段不加颜色）"
                                                                    Foreground="#A16207"
                                                                    FontSize="11"
                                                                    VerticalAlignment="Center"
@@ -526,7 +526,7 @@
                                                                               SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
                                                                               MinWidth="120"
                                                                               Margin="0,0,8,0"
-                                                                              ToolTip="为该段选择颜色后缀；各段拼接后按原组合顺序组成新 SKU"
+                                                                              ToolTip="为该段选择颜色后缀；不选则该段不加颜色。各段按原组合顺序组成新 SKU"
                                                                               SelectionChanged="ColorSuffixCombo_SelectionChanged">
                                                                         <ComboBox.Style>
                                                                             <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
