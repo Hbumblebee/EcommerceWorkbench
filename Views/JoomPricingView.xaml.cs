@@ -23,6 +23,7 @@
  *           2026-10-12 启用颜色后缀时，没选颜色的段不加颜色，仍生成 SKU 建议
  *           2026-10-12 启用颜色后缀时，自动选中段里原有且在颜色列表中的颜色
  *           2026-10-12 复合且重复、且某段带颜色时自动启用颜色后缀
+ *           2026-10-13 颜色下拉可选择「不加颜色」，该段只拼通用后缀
  */
 
 using System.Collections.ObjectModel;
@@ -1736,25 +1737,42 @@ public partial class JoomPricingView : UserControl
         /// <summary>刷新颜色选项：所有段共用同一份可选颜色，并尽量保留已选项。</summary>
         public void LoadColorOptions(IReadOnlyList<string> colors)
         {
+            var previous = Parts.ToDictionary(part => part, part => part.SelectedColor);
             ColorOptions.Clear();
+            ColorOptions.Add(JoomSkuSuffix.NoColorOption);
             foreach (var color in colors)
                 ColorOptions.Add(color);
 
             foreach (var part in Parts)
-            {
-                if (part.SelectedColor is { } current && !colors.Contains(current, StringComparer.OrdinalIgnoreCase))
-                    part.SelectedColor = null;
+                part.SelectedColor = ResolveColorChoice(previous[part], part.OriginalColorSuffix, colors);
+        }
 
-                // 该段去掉末尾通用后缀后仍带颜色（如 -grey），且这个颜色在列表里，就默认选中列表里的那一项。
-                // 不在列表里的颜色保持不选，该段只拼通用后缀。
-                if (part.SelectedColor is null && part.OriginalColorSuffix.Length > 0)
-                {
-                    var match = colors.FirstOrDefault(color =>
-                        color.Equals(part.OriginalColorSuffix, StringComparison.OrdinalIgnoreCase));
-                    if (match is not null)
-                        part.SelectedColor = match;
-                }
+        /// <summary>
+        /// 已选「不加颜色」的保持不加。已选且仍在列表里的颜色保留。
+        /// 还没选过的段，原颜色在列表里就自动选中，否则默认不加颜色。
+        /// </summary>
+        private static string ResolveColorChoice(string? current, string originalColor, IReadOnlyList<string> colors)
+        {
+            if (string.Equals(current, JoomSkuSuffix.NoColorOption, StringComparison.Ordinal))
+                return JoomSkuSuffix.NoColorOption;
+
+            if (JoomSkuSuffix.IsColorChoice(current))
+            {
+                var kept = colors.FirstOrDefault(color =>
+                    color.Equals(current, StringComparison.OrdinalIgnoreCase));
+                if (kept is not null)
+                    return kept;
             }
+
+            if (originalColor.Length > 0)
+            {
+                var match = colors.FirstOrDefault(color =>
+                    color.Equals(originalColor, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                    return match;
+            }
+
+            return JoomSkuSuffix.NoColorOption;
         }
 
         /// <summary>
@@ -1766,13 +1784,13 @@ public partial class JoomPricingView : UserControl
             return string.Join("+", Parts.Select(part =>
                 JoomSkuSuffix.Combine(
                     part.BaseSku,
-                    UseColorSuffix && !string.IsNullOrWhiteSpace(part.SelectedColor) ? part.SelectedColor : null,
+                    UseColorSuffix && JoomSkuSuffix.IsColorChoice(part.SelectedColor) ? part.SelectedColor : null,
                     generalSuffix)));
         }
 
         /// <summary>该段被选中颜色后，会占用的 SKU（用于和当前产品其它 SKU 去重）。</summary>
         public string? ReservedSku(SkuPartSlot part) =>
-            UseColorSuffix && !string.IsNullOrWhiteSpace(part.SelectedColor)
+            UseColorSuffix && JoomSkuSuffix.IsColorChoice(part.SelectedColor)
                 ? part.BaseSku + part.SelectedColor
                 : null;
 

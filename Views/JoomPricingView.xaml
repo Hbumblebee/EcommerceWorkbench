@@ -411,7 +411,7 @@
                                                                           SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
                                                                           MinWidth="120"
                                                                           Margin="0,0,8,0"
-                                                                          ToolTip="为该段选择颜色后缀；不选则该段不加颜色。各段按原组合顺序组成新 SKU"
+                                                                          ToolTip="为该段选择颜色后缀；选「不加颜色」则该段不加颜色。各段按原组合顺序组成新 SKU"
                                                                           SelectionChanged="ColorSuffixCombo_SelectionChanged">
                                                                     <ComboBox.Style>
                                                                         <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">

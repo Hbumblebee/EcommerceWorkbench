@@ -7,12 +7,21 @@
  *           2026-10-07 新增只去末尾通用后缀（保留颜色）的口径，供「搜索SKU」列使用
  *           2026-10-07 新增 SplitParts，供组合 SKU 按段选择颜色后缀
  *           2026-10-08 去掉后缀后补齐清掉残留的「-」（后缀列表里 AS/AS01 不带前导「-」时会留下 12xJ0021-）
+ *           2026-10-13 颜色下拉增加「不加颜色」，选中后该段不拼颜色后缀
  */
 
 namespace EcommerceWorkbench.Services.Joom;
 
 public static class JoomSkuSuffix
 {
+    /// <summary>颜色下拉的第一项。选中后该段只拼通用后缀。</summary>
+    public const string NoColorOption = "不加颜色";
+
+    /// <summary>空值和「不加颜色」都不作为颜色后缀拼进 SKU。</summary>
+    public static bool IsColorChoice(string? selected) =>
+        !string.IsNullOrWhiteSpace(selected)
+        && !string.Equals(selected, NoColorOption, StringComparison.Ordinal);
+
     public static IReadOnlyList<string> Parse(string? raw)
     {
         var result = new List<string>();

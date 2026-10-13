@@ -10,6 +10,7 @@
  *           2026-10-08 页面排布与滚动对齐 JOOM：整页 ScrollViewer + 表格/重复区到边界后交给整页
  *           2026-10-12 启用颜色后缀时，没选颜色的段不加颜色，仍生成 SKU 建议
  *           2026-10-12 复合且重复、且某段带颜色时自动启用颜色后缀
+ *           2026-10-13 颜色下拉可选择「不加颜色」，该段只拼通用后缀
  */
 
 using System.Collections.ObjectModel;
@@ -1938,29 +1939,45 @@ public partial class Smt7PricingView : UserControl
             set => Set(ref _suggestStatus, value);
         }
 
-        /// <summary>刷新颜色选项：所有段共用同一份可选颜色，并清掉已不在列表里的选择。</summary>
+        /// <summary>刷新颜色选项：所有段共用同一份可选颜色，并尽量保留已选项。</summary>
         public void LoadColorOptions(IReadOnlyList<string> colors)
         {
+            var previous = Parts.ToDictionary(part => part, part => part.SelectedColor);
             ColorOptions.Clear();
+            ColorOptions.Add(JoomSkuSuffix.NoColorOption);
             foreach (var color in colors)
                 ColorOptions.Add(color);
 
             foreach (var part in Parts)
-            {
-                if (part.SelectedColor is { } current && !colors.Contains(current, StringComparer.OrdinalIgnoreCase))
-                {
-                    part.SelectedColor = null;
-                    current = null;
-                }
+                part.SelectedColor = ResolveColorChoice(previous[part], part.OriginalColorSuffix, colors);
+        }
 
-                // 该段原本就带颜色（如 -grey、-purple）且在可选列表里的话，默认选中它，
-                // 用户一启用颜色后缀就能直接看到建议，不必每段手动选一遍。
-                if (part.SelectedColor is null && part.OriginalColorSuffix.Length > 0
-                    && colors.Contains(part.OriginalColorSuffix, StringComparer.OrdinalIgnoreCase))
-                {
-                    part.SelectedColor = part.OriginalColorSuffix;
-                }
+        /// <summary>
+        /// 已选「不加颜色」的保持不加。已选且仍在列表里的颜色保留。
+        /// 还没选过的段，原颜色在列表里就自动选中，否则默认不加颜色。
+        /// </summary>
+        private static string ResolveColorChoice(string? current, string originalColor, IReadOnlyList<string> colors)
+        {
+            if (string.Equals(current, JoomSkuSuffix.NoColorOption, StringComparison.Ordinal))
+                return JoomSkuSuffix.NoColorOption;
+
+            if (JoomSkuSuffix.IsColorChoice(current))
+            {
+                var kept = colors.FirstOrDefault(color =>
+                    color.Equals(current, StringComparison.OrdinalIgnoreCase));
+                if (kept is not null)
+                    return kept;
             }
+
+            if (originalColor.Length > 0)
+            {
+                var match = colors.FirstOrDefault(color =>
+                    color.Equals(originalColor, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                    return match;
+            }
+
+            return JoomSkuSuffix.NoColorOption;
         }
 
         /// <summary>
@@ -1972,7 +1989,7 @@ public partial class Smt7PricingView : UserControl
             return string.Join("+", Parts.Select(part =>
                 JoomSkuSuffix.Combine(
                     part.BaseSku,
-                    UseColorSuffix && !string.IsNullOrWhiteSpace(part.SelectedColor) ? part.SelectedColor : null,
+                    UseColorSuffix && JoomSkuSuffix.IsColorChoice(part.SelectedColor) ? part.SelectedColor : null,
                     occupancySuffix)));
         }
 
