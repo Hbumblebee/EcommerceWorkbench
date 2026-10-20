@@ -511,6 +511,9 @@
                                                                     <DataTrigger Binding="{Binding UseColorSuffix}" Value="True">
                                                                         <Setter Property="Visibility" Value="Visible"/>
                                                                     </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding HasMultipleParts}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                    </DataTrigger>
                                                                 </Style.Triggers>
                                                             </Style>
                                                         </ItemsControl.Style>
@@ -521,7 +524,7 @@
                                                                                Foreground="#78350F"
                                                                                VerticalAlignment="Center"
                                                                                Margin="0,0,6,0"
-                                                                               ToolTip="该段基础货号：会与所选颜色、查重后缀拼成这一段"/>
+                                                                               ToolTip="该段基础货号：会与所选颜色、以及勾选启用的通用后缀拼成这一段"/>
                                                                     <ComboBox ItemsSource="{Binding Owner.ColorOptions}"
                                                                               SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
                                                                               MinWidth="120"
@@ -539,6 +542,25 @@
                                                                             </Style>
                                                                         </ComboBox.Style>
                                                                     </ComboBox>
+                                                                    <CheckBox Content="启用通用后缀"
+                                                                              Foreground="#78350F"
+                                                                              VerticalAlignment="Center"
+                                                                              Margin="0,0,8,0"
+                                                                              IsChecked="{Binding UseGeneralSuffix, Mode=TwoWay}"
+                                                                              ToolTip="勾选后这一段拼接当前尝试的通用后缀；取消后这一段不加通用后缀"
+                                                                              Checked="UseGeneralSuffix_Changed"
+                                                                              Unchecked="UseGeneralSuffix_Changed">
+                                                                        <CheckBox.Style>
+                                                                            <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding Owner.HasMultipleParts}" Value="True">
+                                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </CheckBox.Style>
+                                                                    </CheckBox>
                                                                 </WrapPanel>
                                                             </DataTemplate>
                                                         </ItemsControl.ItemTemplate>

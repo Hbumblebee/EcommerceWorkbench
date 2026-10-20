@@ -11,6 +11,7 @@
  *           2026-10-12 启用颜色后缀时，没选颜色的段不加颜色，仍生成 SKU 建议
  *           2026-10-12 复合且重复、且某段带颜色时自动启用颜色后缀
  *           2026-10-13 颜色下拉可选择「不加颜色」，该段只拼通用后缀
+ *           2026-10-13 复合 SKU 每一段可单独选择是否拼接通用后缀
  */
 
 using System.Collections.ObjectModel;
@@ -1256,6 +1257,18 @@ public partial class Smt7PricingView : UserControl
         await FillSuggestedSkusAsync([part.Owner]);
     }
 
+    private async void UseGeneralSuffix_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingColorOptions)
+            return;
+        if (sender is not CheckBox box || box.DataContext is not Smt7SkuPartSlot part || !part.Owner.HasMultipleParts)
+            return;
+
+        part.UseGeneralSuffix = box.IsChecked == true;
+        part.Owner.SuggestionUserEdited = false;
+        await FillSuggestedSkusAsync([part.Owner]);
+    }
+
     private void SuggestedSku_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (sender is FrameworkElement element && element.DataContext is Smt7OccupancyGroup group)
@@ -1559,7 +1572,14 @@ public partial class Smt7PricingView : UserControl
             var waiting = new List<Smt7OccupancyGroup>();
             foreach (var group in pending)
             {
-                // 每一段拼「该段基础货号 + 已选颜色（没选则不加）+ 查重后缀」，再按原组合顺序连回一个 SKU。
+                // 没勾选通用后缀的段不再随后缀列表变化，同一条候选只查一次。
+                if (i > 0 && !group.AnyPartUsesGeneralSuffix)
+                {
+                    waiting.Add(group);
+                    continue;
+                }
+
+                // 每一段拼「该段基础货号 + 已选颜色（没选则不加）+ 已启用的查重后缀」，再按原组合顺序连回一个 SKU。
                 var candidate = group.BuildCandidate(general[i]);
                 // 原 SKU 已以该后缀结尾时（常见于查重后缀列表为空）再拼一次会得到 E0258-1-1，
                 // 这种候选直接跳过，等下一个后缀；拼回原值也没有意义，同样跳过。
@@ -1910,6 +1930,10 @@ public partial class Smt7PricingView : UserControl
         public bool ShouldAutoEnableColorSuffix =>
             HasMultipleParts && Parts.Any(part => part.OriginalColorSuffix.Length > 0);
 
+        /// <summary>复合 SKU 里至少有一段勾选了通用后缀。单段 SKU 始终拼接通用后缀。</summary>
+        public bool AnyPartUsesGeneralSuffix =>
+            !HasMultipleParts || Parts.Any(part => part.UseGeneralSuffix);
+
         public string BaseHint =>
             string.Equals(BaseSku, Sku, StringComparison.Ordinal)
                 ? "该 SKU 没有可去掉的末尾后缀，将直接在每段末尾拼接。"
@@ -1981,8 +2005,8 @@ public partial class Smt7PricingView : UserControl
         }
 
         /// <summary>
-        /// 按段拼出候选 SKU：每段 = 该段基础货号 + 已选颜色（没选则不加）+ 查重后缀，
-        /// 拼好后按原组合顺序用「+」连回一个完整 SKU。
+        /// 按段拼出候选 SKU：每段 = 该段基础货号 + 已选颜色（没选则不加）+ 已启用的查重后缀。
+        /// 复合 SKU 取消某段的通用后缀后，该段不再拼接。拼好后按原组合顺序用「+」连回。
         /// </summary>
         public string BuildCandidate(string occupancySuffix)
         {
@@ -1990,7 +2014,7 @@ public partial class Smt7PricingView : UserControl
                 JoomSkuSuffix.Combine(
                     part.BaseSku,
                     UseColorSuffix && JoomSkuSuffix.IsColorChoice(part.SelectedColor) ? part.SelectedColor : null,
-                    occupancySuffix)));
+                    HasMultipleParts && !part.UseGeneralSuffix ? "" : occupancySuffix)));
         }
 
         private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
@@ -2009,6 +2033,7 @@ public partial class Smt7PricingView : UserControl
     private sealed class Smt7SkuPartSlot : INotifyPropertyChanged
     {
         private string? _selectedColor;
+        private bool _useGeneralSuffix = true;
 
         public Smt7SkuPartSlot(Smt7OccupancyGroup owner, int index, string sku)
         {
@@ -2028,6 +2053,19 @@ public partial class Smt7PricingView : UserControl
         public string BaseSku { get; }
         public string OriginalColorSuffix { get; }
         public string Label => "第" + Index + "段 " + Sku;
+
+        /// <summary>复合 SKU 可按段关闭。关闭后这一段不拼接通用后缀。</summary>
+        public bool UseGeneralSuffix
+        {
+            get => _useGeneralSuffix;
+            set
+            {
+                if (_useGeneralSuffix == value)
+                    return;
+                _useGeneralSuffix = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UseGeneralSuffix)));
+            }
+        }
 
         public string? SelectedColor
         {

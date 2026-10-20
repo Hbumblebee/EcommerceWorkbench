@@ -24,6 +24,7 @@
  *           2026-10-12 启用颜色后缀时，自动选中段里原有且在颜色列表中的颜色
  *           2026-10-12 复合且重复、且某段带颜色时自动启用颜色后缀
  *           2026-10-13 颜色下拉可选择「不加颜色」，该段只拼通用后缀
+ *           2026-10-13 复合 SKU 每一段可单独选择是否拼接通用后缀
  */
 
 using System.Collections.ObjectModel;
@@ -1059,6 +1060,18 @@ public partial class JoomPricingView : UserControl
         await RunSuggestionAsync([part.Owner]);
     }
 
+    private async void UseGeneralSuffix_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSuggestion)
+            return;
+        if (sender is not CheckBox box || box.DataContext is not SkuPartSlot part || !part.Owner.HasMultipleParts)
+            return;
+
+        part.UseGeneralSuffix = box.IsChecked == true;
+        part.Owner.SuggestionUserEdited = false;
+        await RunSuggestionAsync([part.Owner]);
+    }
+
     private void SuggestedSku_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_suppressSuggestion)
@@ -1226,7 +1239,14 @@ public partial class JoomPricingView : UserControl
                         continue;
                     }
 
-                    // 每一段拼「该段基础货号 + 已选颜色（没选则不加）+ 通用后缀」，再按原组合顺序连回一个 SKU。
+                    // 没勾选通用后缀的段不再随后缀列表变化，同一条候选只查一次。
+                    if (i > 0 && !group.AnyPartUsesGeneralSuffix)
+                    {
+                        waiting.Add(group);
+                        continue;
+                    }
+
+                    // 每一段拼「该段基础货号 + 已选颜色（没选则不加）+ 已启用的通用后缀」，再按原组合顺序连回一个 SKU。
                     var candidate = group.BuildCandidate(general[i]);
                     if (candidate.Length == 0 || candidate.Contains(',') || !reserved.Add(candidate))
                     {
@@ -1705,6 +1725,10 @@ public partial class JoomPricingView : UserControl
         public bool ShouldAutoEnableColorSuffix =>
             HasMultipleParts && Parts.Any(part => part.OriginalColorSuffix.Length > 0);
 
+        /// <summary>复合 SKU 里至少有一段勾选了通用后缀。单段 SKU 始终拼接通用后缀。</summary>
+        public bool AnyPartUsesGeneralSuffix =>
+            !HasMultipleParts || Parts.Any(part => part.UseGeneralSuffix);
+
         public string BaseHint =>
             string.Equals(BaseSku, Sku, StringComparison.Ordinal)
                 ? "该 SKU 没有可去掉的末尾后缀，将直接在每段末尾拼接。"
@@ -1776,8 +1800,8 @@ public partial class JoomPricingView : UserControl
         }
 
         /// <summary>
-        /// 按段拼出候选 SKU：每段 = 该段基础货号 + 已选颜色（没选则不加）+ 通用后缀，
-        /// 拼好后按原组合顺序用「+」连回一个完整 SKU。
+        /// 按段拼出候选 SKU：每段 = 该段基础货号 + 已选颜色（没选则不加）+ 已启用的通用后缀。
+        /// 复合 SKU 取消某段的通用后缀后，该段不再拼接。拼好后按原组合顺序用「+」连回。
         /// </summary>
         public string BuildCandidate(string generalSuffix)
         {
@@ -1785,7 +1809,7 @@ public partial class JoomPricingView : UserControl
                 JoomSkuSuffix.Combine(
                     part.BaseSku,
                     UseColorSuffix && JoomSkuSuffix.IsColorChoice(part.SelectedColor) ? part.SelectedColor : null,
-                    generalSuffix)));
+                    HasMultipleParts && !part.UseGeneralSuffix ? "" : generalSuffix)));
         }
 
         /// <summary>该段被选中颜色后，会占用的 SKU（用于和当前产品其它 SKU 去重）。</summary>
@@ -1810,6 +1834,7 @@ public partial class JoomPricingView : UserControl
     private sealed class SkuPartSlot : INotifyPropertyChanged
     {
         private string? _selectedColor;
+        private bool _useGeneralSuffix = true;
 
         public SkuPartSlot(OccupancySkuGroup owner, int index, string sku)
         {
@@ -1829,6 +1854,19 @@ public partial class JoomPricingView : UserControl
         public string BaseSku { get; }
         public string OriginalColorSuffix { get; }
         public string Label => "第" + Index + "段 " + Sku;
+
+        /// <summary>复合 SKU 可按段关闭。关闭后这一段不拼接通用后缀。</summary>
+        public bool UseGeneralSuffix
+        {
+            get => _useGeneralSuffix;
+            set
+            {
+                if (_useGeneralSuffix == value)
+                    return;
+                _useGeneralSuffix = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(UseGeneralSuffix)));
+            }
+        }
 
         public string? SelectedColor
         {
