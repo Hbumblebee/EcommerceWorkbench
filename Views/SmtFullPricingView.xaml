@@ -1,0 +1,425 @@
+<UserControl x:Class="EcommerceWorkbench.Views.SmtFullPricingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer x:Name="PageScroll"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  PreviewMouseWheel="PageScroll_PreviewMouseWheel">
+        <StackPanel Margin="16">
+            <TextBlock Text="速卖通全托"
+                       FontSize="20"
+                       FontWeight="SemiBold"
+                       Foreground="{StaticResource TextBrush}"/>
+            <TextBlock Text="打开店小秘速卖通产品编辑页（https://www.dianxiaomi.com/web/smt/edit?id=…），读取变种 SKU。查重用在线产品列表的 SKU 编码搜索，把在线、草稿箱、已下架、审核中、审核不通过、疑似删除的条数加总，合计超过 1 才算重复。然后按商品库的参考价和重量，用「普货挂号包邮人民币报价」算出速卖通售价和各国调价，写回详情页。"
+                       Foreground="{StaticResource MutedBrush}"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,12"/>
+
+            <Border Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="14,12"
+                    Margin="0,0,0,10">
+                <StackPanel>
+                    <Expander IsExpanded="False" Margin="0,0,0,10">
+                        <Expander.Header>
+                            <TextBlock Text="计算公式 · 普货挂号包邮（默认折叠，展开后可调整并自动保存）"
+                                       Foreground="{StaticResource MutedBrush}"/>
+                        </Expander.Header>
+                        <StackPanel Margin="0,8,0,0">
+                            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8"
+                                       Text="运费 = 重量kg × 售价续重 + 售价挂号&#10;无折扣售价 = (运费 + 成本) / (1 - 佣金 - 利润率) / 售价除数&#10;利润 = 无折扣售价 × (1 - 佣金) - 成本 - 运费&#10;速卖通售价 = 无折扣售价 / (1 - 店铺折扣) / 售价除数&#10;国家调价 = ((该国续重 - 调价续重) × 重量kg + (该国挂号 - 调价挂号)) / 调价除数 / (1 - 店铺折扣)&#10;比例国家 = 速卖通售价 × 比例（0.20 表示 20%）"/>
+                            <WrapPanel Margin="0,0,0,8">
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="售价续重 元/kg" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="SaleRateBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="售价挂号" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="SaleRegBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="佣金" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="CommissionBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="利润率" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="ProfitRateBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="店铺折扣" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="DiscountBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="售价除数" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="SaleDivisorBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="调价续重 元/kg" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="AdjustRateBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="调价挂号" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="AdjustRegBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,12,6">
+                                    <TextBlock Text="调价除数" Foreground="{StaticResource MutedBrush}"/>
+                                    <TextBox x:Name="AdjustDivisorBox" Width="88" LostFocus="FormulaBox_LostFocus"/>
+                                </StackPanel>
+                                <Button Content="恢复公式默认"
+                                        Style="{StaticResource GhostButton}"
+                                        VerticalAlignment="Bottom"
+                                        Margin="0,0,0,6"
+                                        Click="RestoreFormula_Click"/>
+                            </WrapPanel>
+                            <TextBlock Text="各国无忧运费（用于国家调价）" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,4"/>
+                            <DataGrid x:Name="FreightRateGrid"
+                                      Height="148"
+                                      AutoGenerateColumns="False"
+                                      CanUserAddRows="False"
+                                      CanUserDeleteRows="False"
+                                      CanUserSortColumns="False"
+                                      FrozenColumnCount="1"
+                                      HeadersVisibility="Column"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Disabled"
+                                      CellEditEnding="FormulaGrid_CellEditEnding"/>
+                            <TextBlock Text="按速卖通售价比例调价" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,8,0,4"/>
+                            <DataGrid x:Name="PercentRateGrid"
+                                      Height="168"
+                                      AutoGenerateColumns="False"
+                                      CanUserAddRows="False"
+                                      CanUserDeleteRows="False"
+                                      HeadersVisibility="Column"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      CellEditEnding="FormulaGrid_CellEditEnding">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="国家" Binding="{Binding Name, UpdateSourceTrigger=LostFocus}" Width="180"/>
+                                    <DataGridTextColumn Header="代码" Binding="{Binding Code, UpdateSourceTrigger=LostFocus}" Width="120"/>
+                                    <DataGridTextColumn Header="比例（0.20=20%）" Binding="{Binding Rate, UpdateSourceTrigger=LostFocus}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </StackPanel>
+                    </Expander>
+                    <DockPanel Margin="0,0,0,8">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Text="产品链接"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,10,0"
+                                   Foreground="{StaticResource TextBrush}"/>
+                        <TextBox x:Name="ProductUrlBox"
+                                 VerticalContentAlignment="Center"
+                                 LostFocus="ProductUrlBox_LostFocus"/>
+                    </DockPanel>
+                    <WrapPanel>
+                        <Button Content="打开速卖通产品详情页"
+                                Style="{StaticResource OrangeButton}"
+                                Click="OpenProduct_Click"
+                                ToolTip="用已导出 Cookie 打开 /web/smt/edit，并读取变种 SKU"/>
+                        <Button Content="检查SKU占用"
+                                Style="{StaticResource GhostButton}"
+                                Click="CheckOccupancy_Click"
+                                ToolTip="在在线产品列表按 SKU 编码搜索绿框里的全部状态，合计超过 1 条视为重复"/>
+                        <Button Content="搜索定价并回写"
+                                Style="{StaticResource SuccessButton}"
+                                Click="QuoteAndWrite_Click"
+                                ToolTip="用商品库参考价和重量，按普货挂号包邮公式计算，并把售价、重量、各国调价写入详情页"/>
+                        <Button Content="应用新SKU"
+                                Background="#0F766E"
+                                Click="ApplySuggestedSkus_Click"
+                                ToolTip="把已确认未占用的建议 SKU 写入详情页变种信息"/>
+                        <Button Content="恢复原SKU"
+                                Style="{StaticResource GhostButton}"
+                                Click="RestoreOriginalSkus_Click"
+                                Margin="0"
+                                ToolTip="把详情页中已替换的 SKU 恢复为原页面 SKU"/>
+                    </WrapPanel>
+                    <WrapPanel Margin="0,8,0,0">
+                        <TextBlock Text="查重范围"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,6,4"/>
+                        <ComboBox x:Name="OccupancyScopeCombo"
+                                  MinWidth="280"
+                                  Margin="0,0,14,4"
+                                  VerticalContentAlignment="Center"
+                                  SelectionChanged="OccupancyScope_SelectionChanged">
+                            <ComboBoxItem Content="全部（在线+草稿箱+已下架+审核中+审核不通过+疑似删除）"/>
+                            <ComboBoxItem Content="仅在线"/>
+                            <ComboBoxItem Content="仅草稿箱"/>
+                            <ComboBoxItem Content="仅已下架"/>
+                            <ComboBoxItem Content="仅审核中"/>
+                            <ComboBoxItem Content="仅审核不通过"/>
+                            <ComboBoxItem Content="仅疑似删除"/>
+                        </ComboBox>
+                        <TextBlock Text="查重店铺"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextBrush}"
+                                   Margin="0,0,6,4"/>
+                        <ComboBox x:Name="OccupancyShopCombo"
+                                  MinWidth="220"
+                                  Margin="0,0,6,4"
+                                  VerticalContentAlignment="Center"
+                                  DisplayMemberPath="Display"
+                                  SelectionChanged="OccupancyShop_SelectionChanged"/>
+                        <Button Content="刷新店铺列表"
+                                Style="{StaticResource GhostButton}"
+                                Padding="8,2"
+                                Margin="0,0,0,4"
+                                Click="RefreshShops_Click"/>
+                    </WrapPanel>
+                    <Expander IsExpanded="False"
+                              Margin="0,8,0,0">
+                        <Expander.Header>
+                            <TextBlock Text="SKU 后缀（产品重复时使用）"
+                                       Foreground="{StaticResource MutedBrush}"/>
+                        </Expander.Header>
+                        <StackPanel Margin="0,6,0,0">
+                            <TextBlock Text="中英文逗号均可。查重发现重复时，去掉末尾通用后缀、保留颜色，再按顺序拼接通用后缀。原 SKU 还带着颜色（如 -grey）时会自动启用颜色后缀：对上颜色列表的就拼在通用后缀前面，没对上的不加颜色。"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,6"/>
+                            <DockPanel Margin="0,0,0,6">
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="通用后缀"
+                                           Width="64"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,10,0"
+                                           Foreground="{StaticResource TextBrush}"/>
+                                <TextBox x:Name="SuffixBox"
+                                         VerticalContentAlignment="Center"
+                                         LostFocus="SuffixBox_LostFocus"/>
+                            </DockPanel>
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="颜色后缀"
+                                           Width="64"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,10,0"
+                                           Foreground="{StaticResource TextBrush}"/>
+                                <TextBox x:Name="ColorSuffixBox"
+                                         VerticalContentAlignment="Center"
+                                         LostFocus="ColorSuffixBox_LostFocus"/>
+                            </DockPanel>
+                        </StackPanel>
+                    </Expander>
+                    <Border x:Name="OccupancyPanel"
+                            Visibility="Collapsed"
+                            Background="#FFFBEB"
+                            BorderBrush="#FDE68A"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="10,8"
+                            Margin="0,8,0,0">
+                        <StackPanel>
+                            <Expander x:Name="OccupancyExpander" IsExpanded="True" Foreground="#92400E">
+                                <Expander.Header>
+                                    <TextBlock x:Name="OccupancyTitle"
+                                               Foreground="#92400E"
+                                               FontWeight="Bold"
+                                               TextWrapping="Wrap"/>
+                                </Expander.Header>
+                                <ScrollViewer x:Name="OccupancyScroll"
+                                              MinHeight="280"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              Margin="0,6,0,0">
+                                    <ItemsControl x:Name="OccupancyList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="#FDE68A" BorderThickness="0,0,0,1" Padding="0,6,0,6">
+                                                    <StackPanel>
+                                                        <WrapPanel VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Sku}"
+                                                                       FontWeight="Bold"
+                                                                       Foreground="#78350F"
+                                                                       VerticalAlignment="Center"
+                                                                       Margin="0,0,10,4"
+                                                                       ToolTip="{Binding BaseHint}"/>
+                                                            <TextBlock Text="建议SKU"
+                                                                       VerticalAlignment="Center"
+                                                                       Foreground="#78350F"
+                                                                       Margin="0,0,6,4"/>
+                                                            <TextBox Text="{Binding SuggestedSku, UpdateSourceTrigger=PropertyChanged}"
+                                                                     MinWidth="160"
+                                                                     Width="220"
+                                                                     Margin="0,0,8,4"
+                                                                     Padding="6,3"
+                                                                     VerticalContentAlignment="Center"
+                                                                     TextChanged="SuggestedSku_TextChanged"
+                                                                     LostFocus="SuggestedSku_LostFocus"/>
+                                                            <TextBlock Text="{Binding SuggestStatus}"
+                                                                       VerticalAlignment="Center"
+                                                                       Foreground="#A16207"
+                                                                       Margin="0,0,0,4"
+                                                                       TextWrapping="Wrap"/>
+                                                        </WrapPanel>
+                                                        <WrapPanel VerticalAlignment="Center">
+                                                            <CheckBox Content="启用颜色后缀"
+                                                                      Foreground="#78350F"
+                                                                      VerticalAlignment="Center"
+                                                                      Margin="0,0,8,4"
+                                                                      IsChecked="{Binding UseColorSuffix, Mode=TwoWay}"
+                                                                      Checked="UseColorSuffix_Changed"
+                                                                      Unchecked="UseColorSuffix_Changed"/>
+                                                            <TextBlock Text="（原 SKU 带颜色时会自动启用；没对上颜色列表的段不加颜色）"
+                                                                       Foreground="#A16207"
+                                                                       FontSize="11"
+                                                                       VerticalAlignment="Center"
+                                                                       Margin="0,0,0,4">
+                                                                <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding UseColorSuffix}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </WrapPanel>
+                                                        <ItemsControl ItemsSource="{Binding Parts}">
+                                                            <ItemsControl.Style>
+                                                                <Style TargetType="ItemsControl">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding UseColorSuffix}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding HasMultipleParts}" Value="True">
+                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </ItemsControl.Style>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <WrapPanel VerticalAlignment="Center" Margin="0,0,0,4">
+                                                                        <TextBlock Text="{Binding Label}"
+                                                                                   Foreground="#78350F"
+                                                                                   VerticalAlignment="Center"
+                                                                                   Margin="0,0,6,0"/>
+                                                                        <ComboBox ItemsSource="{Binding Owner.ColorOptions}"
+                                                                                  SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
+                                                                                  MinWidth="120"
+                                                                                  Margin="0,0,8,0"
+                                                                                  SelectionChanged="ColorSuffixCombo_SelectionChanged">
+                                                                            <ComboBox.Style>
+                                                                                <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding Owner.UseColorSuffix}" Value="True">
+                                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </ComboBox.Style>
+                                                                        </ComboBox>
+                                                                        <CheckBox Content="启用通用后缀"
+                                                                                  Foreground="#78350F"
+                                                                                  VerticalAlignment="Center"
+                                                                                  IsChecked="{Binding UseGeneralSuffix, Mode=TwoWay}"
+                                                                                  Checked="UseGeneralSuffix_Changed"
+                                                                                  Unchecked="UseGeneralSuffix_Changed">
+                                                                            <CheckBox.Style>
+                                                                                <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding Owner.HasMultipleParts}" Value="True">
+                                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </CheckBox.Style>
+                                                                        </CheckBox>
+                                                                    </WrapPanel>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                        <ItemsControl ItemsSource="{Binding Hits}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <TextBlock Margin="12,2,0,2" TextWrapping="Wrap">
+                                                                        <Run Text="{Binding Summary}" Foreground="#78350F"/>
+                                                                        <Run Text="  "/>
+                                                                        <Hyperlink Click="OccupancyLink_Click"
+                                                                                   Tag="{Binding EditUrl}"
+                                                                                   Foreground="#1D4ED8">打开该产品</Hyperlink>
+                                                                    </TextBlock>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Expander>
+                            <Expander x:Name="DetailProbeExpander"
+                                      Visibility="Collapsed"
+                                      Margin="0,6,0,0"
+                                      Foreground="#78350F">
+                                <Expander.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="查重诊断"
+                                                   Foreground="#78350F"
+                                                   FontWeight="Bold"
+                                                   VerticalAlignment="Center"/>
+                                        <Button Content="复制"
+                                                Style="{StaticResource GhostButton}"
+                                                Padding="6,1"
+                                                Margin="8,0,0,0"
+                                                Click="CopyDetailProbes_Click"/>
+                                    </StackPanel>
+                                </Expander.Header>
+                                <ListBox x:Name="DetailProbeList"
+                                         MaxHeight="150"
+                                         ScrollViewer.CanContentScroll="False"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="#78350F"
+                                         FontSize="11">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextWrapping="Wrap"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Expander>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                <DataGrid x:Name="SkuGrid"
+                          MinHeight="280"
+                          Height="320"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="序号" Binding="{Binding Index}" IsReadOnly="True" Width="52"/>
+                        <DataGridTextColumn Header="页面SKU" Binding="{Binding PageSku}" IsReadOnly="True" Width="160"/>
+                        <DataGridTextColumn Header="建议SKU" Binding="{Binding SuggestedSku}" IsReadOnly="True" Width="160"/>
+                        <DataGridTextColumn Header="搜索SKU" Binding="{Binding Sku, UpdateSourceTrigger=LostFocus}" Width="160"/>
+                        <DataGridTextColumn Header="成本" Binding="{Binding Cost, StringFormat=0.00}" IsReadOnly="True" Width="72"/>
+                        <DataGridTextColumn Header="重量kg" Binding="{Binding WeightKg, StringFormat=0.000}" IsReadOnly="True" Width="72"/>
+                        <DataGridTextColumn Header="无折扣售价" Binding="{Binding UndiscountedPrice, StringFormat=0.00}" IsReadOnly="True" Width="88"/>
+                        <DataGridTextColumn Header="利润" Binding="{Binding Profit, StringFormat=0.00}" IsReadOnly="True" Width="72"/>
+                        <DataGridTextColumn Header="速卖通售价" Binding="{Binding SmtPrice, StringFormat=0.00}" IsReadOnly="True" Width="88"/>
+                        <DataGridTextColumn Header="状态" Binding="{Binding Status}" IsReadOnly="True" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

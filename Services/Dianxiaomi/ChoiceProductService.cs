@@ -3,12 +3,13 @@
  *           并可按「当前店铺」核对变种 SKU 是否已被同店铺其它速卖通全托管产品占用。
  * 主要职责：从维护的 edit 链接解析产品 ID，带 Cookie 调用 choiceProduct/edit.json；
  *           变种按 SKU 去重，重量按【货品信息】货品条码唯一匹配【变种信息】后取 packageWeight（kg）；
- *           查重走 choiceProduct/pageList.json：按 searchValue 精确搜 SKU，查到即视为重复。
+ *           查重走 choiceProduct/pageList.json：按 searchValue 精确搜 SKU，返回总数大于 1 才视为重复。
  * 创建日期：2026-09-13
  * 更新日期：2026-09-13 重量来自货品信息，按货品条码匹配
  *           2026-10-07 新增按当前店铺的 SKU 占用检查（采集箱/待发布/在线）
  *           2026-10-07 重量在货品条码缺失/匹配不到时回退用变种自带 packageWeight（否则整列带不出重量）
  *           2026-10-08 查重改为 choiceProduct/pageList.json 按 SKU 搜索（查到即重复），多值对分定位
+ *           2026-10-20 返回总数大于 1 才判定 SKU 重复，总数为 1 不算重复
  */
 
 using System.Collections.Concurrent;
@@ -110,7 +111,7 @@ public sealed class ChoiceVariantSkuGroup
 public sealed class ChoiceProductService
 {
     public const string EditJsonUrl = "https://www.dianxiaomi.com/api/choiceProduct/edit.json";
-    /// <summary>查重用的列表接口：按 searchValue 精确搜 SKU，查到即视为重复。</summary>
+    /// <summary>查重用的列表接口：按 searchValue 精确搜 SKU，返回总数大于 1 才视为重复。</summary>
     public const string PageListUrl = "https://www.dianxiaomi.com/api/choiceProduct/pageList.json";
     private const int PageSize = 50;
     /// <summary>一次查询允许发出的请求数上限（对分法逐 SKU 定位）；超出部分如实记为未核对。</summary>
@@ -253,7 +254,7 @@ public sealed class ChoiceProductService
 
     /// <summary>
     /// 按变种 SKU 核对是否已被**指定店铺**的其它速卖通全托管产品占用。
-    /// 走 choiceProduct/pageList.json：按 <c>searchValue</c> 精确搜 SKU，**查到即视为重复**。
+    /// 走 choiceProduct/pageList.json：按 <c>searchValue</c> 精确搜 SKU，**返回总数大于 1 才视为重复**。
     /// 多值搜索是「或」语义且不告诉命中的是哪一个，所以按对分法逐 SKU 定位。
     /// </summary>
     public async Task<ChoiceSkuOccupancyReport> FindOccupanciesAsync(
@@ -405,7 +406,7 @@ public sealed class ChoiceProductService
             var sku = candidates[0];
             if (items.Count == 0)
             {
-                // 有总数但没返回明细：仍按「查到即重复」记账。
+                // 总数大于 1 但没返回明细：仍按重复记账。
                 hits.Add(new ChoiceSkuOccupancy
                 {
                     Sku = sku,
@@ -523,7 +524,8 @@ public sealed class ChoiceProductService
                 }
             }
 
-            var found = total > 0 || items.Count > 0;
+            // 总数为 1 通常是当前产品自己，不算重复；大于 1 才说明还有其它产品占用。
+            var found = total > 1;
             return (found, items, null);
         }
         catch (JsonException)

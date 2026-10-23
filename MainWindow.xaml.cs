@@ -8,6 +8,7 @@
  *   2026-09-05 JOOM 产品详情页读取变种 SKU 并回写价格
  *   2026-09-13 增加速卖通7 页签，对齐全托2.0 公式并回写供货价
  *   2026-10-02 现代化主框架、标签入场动画与状态反馈
+ *   2026-10-22 增加速卖通全托页签，打开 /web/smt/edit 并按速卖通7 的规则查重
  */
 
 using System.Windows;
@@ -53,6 +54,15 @@ public partial class MainWindow : Window
         Smt7View.CookieHeaderProvider = () => SearchView.TryGetCookieHeader();
         Smt7View.CookieRecordsProvider = () => SearchView.TryGetCookies();
         Smt7View.CookieInvalidated += (_, msg) => SearchView.HandleExternalCookieInvalid(msg);
+        SmtFullView.StatusChanged += (_, msg) => SetStatus(msg);
+        SmtFullView.CountChanged += (_, msg) =>
+        {
+            if (TabSmtFull.IsChecked == true)
+                CountText.Text = msg;
+        };
+        SmtFullView.CookieHeaderProvider = () => SearchView.TryGetCookieHeader();
+        SmtFullView.CookieRecordsProvider = () => SearchView.TryGetCookies();
+        SmtFullView.CookieInvalidated += (_, msg) => SearchView.HandleExternalCookieInvalid(msg);
         Closing += (_, _) => WindowBoundsStore.SaveFrom(this);
         Closed += (_, _) =>
         {
@@ -60,6 +70,7 @@ public partial class MainWindow : Window
             PricingView.Cleanup();
             JoomView.Cleanup();
             Smt7View.Cleanup();
+            SmtFullView.Cleanup();
         };
     }
 
@@ -70,7 +81,7 @@ public partial class MainWindow : Window
 
     private void TabSearch_Checked(object sender, RoutedEventArgs e)
     {
-        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null)
+        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null || SmtFullView is null)
             return;
         ShowView(SearchView, animate: false);
         ShortcutHint.Text = "F5 计算 | Ctrl+E 导出";
@@ -78,7 +89,7 @@ public partial class MainWindow : Window
 
     private void TabPricing_Checked(object sender, RoutedEventArgs e)
     {
-        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null)
+        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null || SmtFullView is null)
             return;
         ShowView(PricingView);
         ShortcutHint.Text = "F5 计算 | Ctrl+E 导出";
@@ -86,7 +97,7 @@ public partial class MainWindow : Window
 
     private void TabJoom_Checked(object sender, RoutedEventArgs e)
     {
-        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null)
+        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null || SmtFullView is null)
             return;
         ShowView(JoomView);
         ShortcutHint.Text = "F5 计算";
@@ -95,11 +106,20 @@ public partial class MainWindow : Window
 
     private void TabSmt7_Checked(object sender, RoutedEventArgs e)
     {
-        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null)
+        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null || SmtFullView is null)
             return;
         ShowView(Smt7View);
         ShortcutHint.Text = "F5 计算";
         Smt7View.RefreshCount();
+    }
+
+    private void TabSmtFull_Checked(object sender, RoutedEventArgs e)
+    {
+        if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null || SmtFullView is null)
+            return;
+        ShowView(SmtFullView);
+        ShortcutHint.Text = "打开详情后检查 SKU 占用";
+        SmtFullView.RefreshCount();
     }
 
     private void ShowView(FrameworkElement target, bool animate = true)
@@ -108,6 +128,7 @@ public partial class MainWindow : Window
         PricingView.Visibility = ReferenceEquals(target, PricingView) ? Visibility.Visible : Visibility.Collapsed;
         JoomView.Visibility = ReferenceEquals(target, JoomView) ? Visibility.Visible : Visibility.Collapsed;
         Smt7View.Visibility = ReferenceEquals(target, Smt7View) ? Visibility.Visible : Visibility.Collapsed;
+        SmtFullView.Visibility = ReferenceEquals(target, SmtFullView) ? Visibility.Visible : Visibility.Collapsed;
 
         if (animate)
             TransitionHelper.Reveal(target);
@@ -139,6 +160,8 @@ public partial class MainWindow : Window
                 JoomView.RecalculateAll();
             else if (TabSmt7.IsChecked == true)
                 Smt7View.RecalculateAll();
+            else if (TabSmtFull.IsChecked == true)
+                e.Handled = true;
             else
                 PricingView.RecalculateAll();
             e.Handled = true;
