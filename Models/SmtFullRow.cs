@@ -4,6 +4,7 @@
  * 创建日期：2026-10-22
  * 修改记录：2026-10-22 增加成本、重量和挂号包邮计算结果
  *           2026-10-22 增加搜索 SKU：去掉末尾通用后缀、保留颜色
+ *           2026-10-24 保存基准运费和各国无忧调价，供 SKU 表下方展示和回写
  */
 
 using System.ComponentModel;
@@ -22,6 +23,8 @@ public sealed class SmtFullRow : INotifyPropertyChanged
     private double? _undiscountedPrice;
     private double? _profit;
     private double? _smtPrice;
+    private double? _freightCny;
+    private IReadOnlyList<double?> _countryAmounts = [];
     private string? _suggestedSku;
     private string? _appliedPageSku;
     private string? _status;
@@ -86,6 +89,38 @@ public sealed class SmtFullRow : INotifyPropertyChanged
     {
         get => _smtPrice;
         set => Set(ref _smtPrice, value);
+    }
+
+    /// <summary>基准运费：重量千克 × 售价续重 + 售价挂号。</summary>
+    public double? FreightCny
+    {
+        get => _freightCny;
+        set => Set(ref _freightCny, value);
+    }
+
+    /// <summary>与当前公式国家列顺序一致的无忧调价。空表示这一行还没算出运费。</summary>
+    public IReadOnlyList<double?> CountryAmounts => _countryAmounts;
+
+    /// <summary>按当前公式的国家顺序写入调价。传 null 表示清空。</summary>
+    public void SetCountryAmounts(IReadOnlyList<double?>? amounts)
+    {
+        _countryAmounts = amounts ?? [];
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+    }
+
+    /// <summary>国家列重建后刷新横向结果，不改已经算好的金额。</summary>
+    public void RefreshCountryAmounts() =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
+
+    /// <summary>按下标读取某一国的调价，供横向结果表绑定。</summary>
+    public string this[int index]
+    {
+        get
+        {
+            if ((uint)index >= (uint)_countryAmounts.Count || _countryAmounts[index] is null)
+                return "";
+            return _countryAmounts[index]!.Value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+        }
     }
 
     public string? Status

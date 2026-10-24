@@ -125,7 +125,7 @@
                                      Checked="TabSmt7_Checked"/>
                         <RadioButton x:Name="TabSmtFull"
                                      Style="{StaticResource TabRadio}"
-                                     Content="速卖通全托"
+                                     Content="速卖通半托"
                                      Checked="TabSmtFull_Checked"/>
                     </StackPanel>
                 </Border>

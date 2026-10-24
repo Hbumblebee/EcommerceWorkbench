@@ -9,6 +9,9 @@
  *   2026-09-13 增加速卖通7 页签，对齐全托2.0 公式并回写供货价
  *   2026-10-02 现代化主框架、标签入场动画与状态反馈
  *   2026-10-22 增加速卖通全托页签，打开 /web/smt/edit 并按速卖通7 的规则查重
+ *   2026-10-23 速卖通全托页操作提示改为三步流程
+ *   2026-10-24 页签名称由速卖通全托改为速卖通半托
+ *   2026-10-24 半托页操作提示改为先定价再回写
  */
 
 using System.Windows;
@@ -118,7 +121,7 @@ public partial class MainWindow : Window
         if (SearchView is null || PricingView is null || JoomView is null || Smt7View is null || SmtFullView is null)
             return;
         ShowView(SmtFullView);
-        ShortcutHint.Text = "打开详情后检查 SKU 占用";
+        ShortcutHint.Text = "打开详情 → 搜索并定价 → 回写";
         SmtFullView.RefreshCount();
     }
 

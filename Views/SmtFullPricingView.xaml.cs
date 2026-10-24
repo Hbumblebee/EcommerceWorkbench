@@ -1,5 +1,5 @@
 /*
- * 功能说明：速卖通全托页。打开 /web/smt/edit 详情，读取变种 SKU，并按与速卖通7 相同的规则查重。
+ * 功能说明：速卖通半托页。打开 /web/smt/edit 详情，读取变种 SKU，并按与速卖通7 相同的规则查重。
  * 主要职责：维护产品链接；调用 smtProduct/edit.json 读 SKU；
  *           在线产品列表各状态合计超过 1 才算 SKU 重复；
  *           用商品库参考价和重量按普货挂号包邮公式计价，并回写详情页。
@@ -13,6 +13,12 @@
  *           2026-10-22 回写结果提示区域调价表格已写入；0 条时带上变种数和报价数
  *           2026-10-23 无忧运费改成与计算表相同的横向国家列
  *           2026-10-23 各国无忧运费写入详情页区域调价表
+ *           2026-10-23 操作收成三步，变种表占满剩余高度
+ *           2026-10-23 查重区加高到 400，变种表加高到 480
+ *           2026-10-24 页面标题改为速卖通半托
+ *           2026-10-24 打开详情后不再自动查重
+ *           2026-10-24 SKU 表下方展示各国运费
+ *           2026-10-24 定价并回写拆成搜索并定价、回写
  */
 
 using System.Collections.ObjectModel;
@@ -82,6 +88,7 @@ public partial class SmtFullPricingView : UserControl
         _productService = new SmtProductService(_apiClient);
         _productSearch = new ProductSearchService(_apiClient);
         SkuGrid.ItemsSource = _rows;
+        FreightResultGrid.ItemsSource = _rows;
         FreightRateGrid.ItemsSource = _freightSheetRows;
         PercentRateGrid.ItemsSource = _percentRates;
         OccupancyList.ItemsSource = _occupancies;
@@ -119,13 +126,10 @@ public partial class SmtFullPricingView : UserControl
     /// <summary>DataGrid 内部 ScrollViewer 的模板部件名。</summary>
     private const string GridScrollViewerName = "DG_ScrollViewer";
 
-    /// <summary>
-    /// 鼠标在公式表、结果表、查重区里时先滚那一块；滚到头再滚整页。
-    /// 表格按行，文字区按像素。
-    /// </summary>
+    /// <summary>鼠标在公式表、结果表、查重区里时滚那一块。滚到头就交给这块自己的滚动条。</summary>
     private void PageScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        var target = PageScroll;
+        ScrollViewer? target = null;
         var step = WheelScrollHelper.LinesPerNotch() * WheelScrollHelper.TextLinePixels;
 
         if (TryScrollableGrid(FreightRateGrid, e.Delta, out var freightScroll))
@@ -143,6 +147,11 @@ public partial class SmtFullPricingView : UserControl
             target = skuScroll;
             step = WheelScrollHelper.LinesPerNotch();
         }
+        else if (TryScrollableGrid(FreightResultGrid, e.Delta, out var freightResultScroll))
+        {
+            target = freightResultScroll;
+            step = WheelScrollHelper.LinesPerNotch();
+        }
         else if (OccupancyScroll.IsMouseOver && WheelScrollHelper.CanScroll(OccupancyScroll, e.Delta))
         {
             target = OccupancyScroll;
@@ -153,6 +162,17 @@ public partial class SmtFullPricingView : UserControl
         {
             target = probeScroll;
         }
+        else if (FormulaScroll.IsMouseOver && WheelScrollHelper.CanScroll(FormulaScroll, e.Delta))
+        {
+            target = FormulaScroll;
+        }
+        else if (WheelScrollHelper.CanScroll(PageScroll, e.Delta))
+        {
+            target = PageScroll;
+        }
+
+        if (target is null)
+            return;
 
         WheelScrollHelper.ScrollWheel(target, e.Delta, step);
         e.Handled = true;
@@ -253,22 +273,10 @@ public partial class SmtFullPricingView : UserControl
             _openedProductId = productId;
             _openedShopId = detail.ShopId;
             EnsureCurrentShopOption();
-            var loaded = $"已读取变种 SKU {detail.Skus.Count} 个。店铺 {detail.ShopId}。";
-            try
-            {
-                var occupancy = await DescribeOccupancyAsync(detail.Skus.Select(s => s.PageSku).ToList());
-                SetStatus(loaded + occupancy);
-            }
-            catch (Exception occupancyEx)
-            {
-                ClearOccupancy();
-                SetStatus(loaded + "占用检查失败：" + occupancyEx.Message);
-                if (CookieErrorDetector.IsAuthFailure(occupancyEx.Message))
-                    CookieInvalidated?.Invoke(this, occupancyEx.Message);
-                return;
-            }
-
-            _productWindow?.SetHint("已读取变种 SKU。若列出同店铺已占用的 SKU，建议 SKU 已按原后缀向后依次找过未占用的货号。");
+            ClearOccupancy();
+            var loaded = $"已读取变种 SKU {detail.Skus.Count} 个。店铺 {detail.ShopId}。需要查重时点「检查占用」。";
+            SetStatus(loaded);
+            _productWindow?.SetHint("已读取变种 SKU。查重请回到工作台点「检查占用」。");
             UpdateCount();
             BringMainWindowToFront();
         }
@@ -409,6 +417,7 @@ public partial class SmtFullPricingView : UserControl
         _percentRates.Clear();
         foreach (var item in formula.PercentCountries)
             _percentRates.Add(item);
+        RebuildFreightResultColumns();
     }
 
     private SmtQuoteFormula ReadFormula()
@@ -475,8 +484,67 @@ public partial class SmtFullPricingView : UserControl
             row.UndiscountedPrice = quote.UndiscountedPrice;
             row.Profit = quote.Profit;
             row.SmtPrice = quote.SmtPrice;
+            ApplyFreightResult(row, quote);
             row.Status = "已按当前公式重算";
         }
+    }
+
+    /// <summary>把基准运费和各国无忧调价记到行上，下方结果表按国家列读这些数。</summary>
+    private static void ApplyFreightResult(SmtFullRow row, SmtRegisteredQuote? quote)
+    {
+        if (quote is null)
+        {
+            row.FreightCny = null;
+            row.SetCountryAmounts(null);
+            return;
+        }
+
+        row.FreightCny = quote.FreightCny;
+        row.SetCountryAmounts(quote.Countries.Select(country => (double?)country.Amount).ToList());
+    }
+
+    /// <summary>SKU 表下方的运费结果：序号、页面 SKU、基准运费，以及横向的各国调价。</summary>
+    private void RebuildFreightResultColumns()
+    {
+        FreightResultGrid.Columns.Clear();
+        FreightResultGrid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "序号",
+            Binding = new Binding(nameof(SmtFullRow.Index)),
+            Width = 52
+        });
+        FreightResultGrid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "页面SKU",
+            Binding = new Binding(nameof(SmtFullRow.PageSku)),
+            Width = 160
+        });
+        FreightResultGrid.Columns.Add(new DataGridTextColumn
+        {
+            Header = "运费",
+            Binding = new Binding(nameof(SmtFullRow.FreightCny)) { StringFormat = "0.00" },
+            Width = 72
+        });
+
+        var index = 0;
+        foreach (var rate in _freightRates.Concat(_percentRates.Select(item => new SmtFreightRate
+                 {
+                     Name = item.Name,
+                     Code = item.Code
+                 })))
+        {
+            var header = string.IsNullOrWhiteSpace(rate.Name) ? rate.Code : rate.Name;
+            FreightResultGrid.Columns.Add(new DataGridTextColumn
+            {
+                Header = header,
+                Binding = new Binding($"[{index}]"),
+                Width = 88
+            });
+            index++;
+        }
+
+        foreach (var row in _rows)
+            row.RefreshCountryAmounts();
     }
 
     private static double ReadDouble(TextBox box, double fallback)
@@ -801,7 +869,7 @@ public partial class SmtFullPricingView : UserControl
         }
     }
 
-    private async void QuoteAndWrite_Click(object sender, RoutedEventArgs e)
+    private async void SearchAndQuote_Click(object sender, RoutedEventArgs e)
     {
         if (_busy)
             return;
@@ -822,8 +890,56 @@ public partial class SmtFullPricingView : UserControl
         }
 
         var cookieHeader = GetCookieHeader();
+        if (string.IsNullOrWhiteSpace(cookieHeader))
+        {
+            MessageBox.Show("请先在「店小秘搜索」登录并导出 Cookie。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            SetStatus($"正在按 {skus.Count} 个搜索 SKU 查询参考价和重量…");
+            var outcome = await _productSearch.SearchAsync(skus, cookieHeader);
+            var priced = ApplySearchAndCalculate(outcome);
+            var hint = priced == 0
+                ? "没有算出售价。未命中或缺少价格/重量的 SKU 已标在表格状态列。"
+                : $"已定价 {priced} 个 SKU。请核对售价和各国运费，确认后点「回写」。";
+            SetStatus(hint);
+            UpdateCount();
+            if (priced == 0)
+                MessageBox.Show(hint, "搜索并定价", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("搜索定价失败：" + ex.Message);
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
+                CookieInvalidated?.Invoke(this, ex.Message);
+            else
+                MessageBox.Show(ex.Message, "搜索定价失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async void WriteQuotes_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+            return;
+
+        CommitGrid();
+        CommitFormulaEdits();
+        var priced = CollectWriteRows();
+        if (priced.Count == 0)
+        {
+            MessageBox.Show("还没有可回写的售价。请先点「搜索并定价」。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
         var cookies = GetCookieRecords();
-        if (string.IsNullOrWhiteSpace(cookieHeader) || cookies is null || cookies.Count == 0)
+        if (string.IsNullOrWhiteSpace(GetCookieHeader()) || cookies is null || cookies.Count == 0)
         {
             MessageBox.Show("请先在「店小秘搜索」登录并导出 Cookie。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -845,16 +961,6 @@ public partial class SmtFullPricingView : UserControl
         _busy = true;
         try
         {
-            SetStatus($"正在按 {skus.Count} 个搜索 SKU 查询参考价和重量…");
-            var outcome = await _productSearch.SearchAsync(skus, cookieHeader);
-            var priced = ApplySearchAndCalculate(outcome);
-            if (priced.Count == 0)
-            {
-                SetStatus("没有算出可回写的售价。请确认商品库能搜到这些 SKU 的参考价和重量。");
-                MessageBox.Show("没有算出可回写的售价。未命中或缺少价格/重量的 SKU 已标在表格状态列。", "搜索定价", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
             SetStatus($"正在把 {priced.Count} 个 SKU 的售价、重量和各国无忧运费写入详情页…");
             await OpenProductWindowAsync(new Uri(editUrl), cookies, reload: false);
             var countryNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -889,11 +995,11 @@ public partial class SmtFullPricingView : UserControl
         }
         catch (Exception ex)
         {
-            SetStatus("搜索定价或回写失败：" + ex.Message);
+            SetStatus("回写失败：" + ex.Message);
             if (CookieErrorDetector.IsAuthFailure(ex.Message))
                 CookieInvalidated?.Invoke(this, ex.Message);
             else
-                MessageBox.Show(ex.Message, "搜索定价或回写失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(ex.Message, "回写失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
         {
@@ -902,7 +1008,7 @@ public partial class SmtFullPricingView : UserControl
     }
 
     /// <summary>商品库重量是克。参考价当作成本，按挂号包邮表算出售价和各国调价。</summary>
-    private List<object> ApplySearchAndCalculate(ProductSearchOutcome outcome)
+    private int ApplySearchAndCalculate(ProductSearchOutcome outcome)
     {
         var bySku = new Dictionary<string, ProductResultRow>(StringComparer.OrdinalIgnoreCase);
         foreach (var hit in outcome.Rows)
@@ -912,7 +1018,7 @@ public partial class SmtFullPricingView : UserControl
                 bySku.TryAdd(key, hit);
         }
 
-        var payload = new List<object>();
+        var priced = 0;
         foreach (var row in _rows)
         {
             var search = NormalizeSku(string.IsNullOrWhiteSpace(row.Sku) ? row.PageSku : row.Sku);
@@ -922,6 +1028,7 @@ public partial class SmtFullPricingView : UserControl
             row.UndiscountedPrice = null;
             row.Profit = null;
             row.SmtPrice = null;
+            ApplyFreightResult(row, null);
             if (search.Length == 0 || pageSku.Length == 0)
                 continue;
             if (!bySku.TryGetValue(search, out var hit) || hit.Price is null || hit.Weight is null)
@@ -938,15 +1045,40 @@ public partial class SmtFullPricingView : UserControl
             row.UndiscountedPrice = quote.UndiscountedPrice;
             row.Profit = quote.Profit;
             row.SmtPrice = quote.SmtPrice;
+            ApplyFreightResult(row, quote);
             row.Status = "已计算";
+            priced++;
+        }
+
+        return priced;
+    }
+
+    /// <summary>用表格里已经算出的售价、重量和各国调价组回写数据。</summary>
+    private List<object> CollectWriteRows()
+    {
+        var codes = _freightRates
+            .Select(item => item.Code)
+            .Concat(_percentRates.Select(item => item.Code))
+            .ToList();
+        var payload = new List<object>();
+        foreach (var row in _rows)
+        {
+            var pageSku = NormalizeSku(row.PageSku);
+            if (pageSku.Length == 0 || row.SmtPrice is null || row.WeightKg is null)
+                continue;
             var countries = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-            foreach (var country in quote.Countries)
-                countries[country.Code] = country.Amount;
+            for (var i = 0; i < codes.Count && i < row.CountryAmounts.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(codes[i]) || row.CountryAmounts[i] is not double amount)
+                    continue;
+                countries[codes[i].Trim()] = amount;
+            }
+
             payload.Add(new
             {
                 sku = pageSku,
-                price = quote.SmtPrice,
-                weightKg,
+                price = row.SmtPrice.Value,
+                weightKg = row.WeightKg.Value,
                 countries
             });
         }

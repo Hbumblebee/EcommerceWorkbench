@@ -5,29 +5,124 @@
                   VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
                   PreviewMouseWheel="PageScroll_PreviewMouseWheel">
-        <StackPanel Margin="16">
-            <TextBlock Text="速卖通全托"
-                       FontSize="20"
-                       FontWeight="SemiBold"
-                       Foreground="{StaticResource TextBrush}"/>
-            <TextBlock Text="打开店小秘速卖通产品编辑页（https://www.dianxiaomi.com/web/smt/edit?id=…），读取变种 SKU。查重用在线产品列表的 SKU 编码搜索，把在线、草稿箱、已下架、审核中、审核不通过、疑似删除的条数加总，合计超过 1 才算重复。然后按商品库的参考价和重量，用「普货挂号包邮人民币报价」算出速卖通售价和各国调价，写回详情页。"
-                       Foreground="{StaticResource MutedBrush}"
-                       TextWrapping="Wrap"
-                       Margin="0,6,0,12"/>
+    <Grid Margin="14,10,14,8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-            <Border Background="{StaticResource PanelBrush}"
-                    BorderBrush="{StaticResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10"
-                    Padding="14,12"
-                    Margin="0,0,0,10">
-                <StackPanel>
-                    <Expander IsExpanded="False" Margin="0,0,0,10">
-                        <Expander.Header>
-                            <TextBlock Text="计算公式 · 普货挂号包邮（默认折叠，展开后可调整并自动保存）"
-                                       Foreground="{StaticResource MutedBrush}"/>
-                        </Expander.Header>
-                        <StackPanel Margin="0,8,0,0">
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="速卖通半托"
+                       Style="{StaticResource PageTitleStyle}"
+                       VerticalAlignment="Center"/>
+            <TextBlock Text="打开详情 → 需要时再检查占用 → 搜索并定价 → 确认后回写售价、重量和各国无忧运费"
+                       Style="{StaticResource PageDescriptionStyle}"
+                       Margin="12,0,0,0"
+                       VerticalAlignment="Center"/>
+        </DockPanel>
+
+        <Border Grid.Row="1"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="14,10"
+                Margin="0,0,0,8">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                    <TextBlock DockPanel.Dock="Left"
+                               Text="产品链接"
+                               VerticalAlignment="Center"
+                               Margin="0,0,10,0"
+                               Foreground="{StaticResource TextBrush}"/>
+                    <TextBox x:Name="ProductUrlBox"
+                             VerticalContentAlignment="Center"
+                             ToolTip="https://www.dianxiaomi.com/web/smt/edit?id=…"
+                             LostFocus="ProductUrlBox_LostFocus"/>
+                </DockPanel>
+                <DockPanel Margin="0,0,0,8">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <TextBlock Text="有重复时"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   Margin="8,0,8,0"/>
+                        <Button Content="应用新SKU"
+                                Background="#0F766E"
+                                Click="ApplySuggestedSkus_Click"
+                                ToolTip="把已确认未占用的建议 SKU 写入详情页变种信息"/>
+                        <Button Content="恢复原SKU"
+                                Style="{StaticResource GhostButton}"
+                                Click="RestoreOriginalSkus_Click"
+                                Margin="0"
+                                ToolTip="把详情页中已替换的 SKU 恢复为原页面 SKU"/>
+                    </StackPanel>
+                    <WrapPanel>
+                        <Button Content="1  打开详情"
+                                Style="{StaticResource OrangeButton}"
+                                Click="OpenProduct_Click"
+                                ToolTip="打开 /web/smt/edit，只读取变种 SKU，不自动查重"/>
+                        <Button Content="2  检查占用"
+                                Style="{StaticResource GhostButton}"
+                                Click="CheckOccupancy_Click"
+                                ToolTip="在在线产品列表按页面 SKU 搜索。在线、草稿箱、已下架、审核中、审核不通过、疑似删除合计超过 1 条视为重复"/>
+                        <Button Content="3  搜索并定价"
+                                Style="{StaticResource SuccessButton}"
+                                Click="SearchAndQuote_Click"
+                                ToolTip="按搜索 SKU 取商品库参考价和重量，算出速卖通售价和各国运费，先显示在表格里"/>
+                        <Button Content="4  回写"
+                                Style="{StaticResource SuccessButton}"
+                                Click="WriteQuotes_Click"
+                                Margin="0"
+                                ToolTip="把已算出的售价、重量和各国无忧运费写入当前详情页"/>
+                    </WrapPanel>
+                </DockPanel>
+                <WrapPanel>
+                    <TextBlock Text="查重范围"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource TextBrush}"
+                               Margin="0,0,6,4"/>
+                    <ComboBox x:Name="OccupancyScopeCombo"
+                              MinWidth="160"
+                              Margin="0,0,14,4"
+                              VerticalContentAlignment="Center"
+                              SelectionChanged="OccupancyScope_SelectionChanged">
+                        <ComboBoxItem Content="全部状态"/>
+                        <ComboBoxItem Content="仅在线"/>
+                        <ComboBoxItem Content="仅草稿箱"/>
+                        <ComboBoxItem Content="仅已下架"/>
+                        <ComboBoxItem Content="仅审核中"/>
+                        <ComboBoxItem Content="仅审核不通过"/>
+                        <ComboBoxItem Content="仅疑似删除"/>
+                    </ComboBox>
+                    <TextBlock Text="店铺"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource TextBrush}"
+                               Margin="0,0,6,4"/>
+                    <ComboBox x:Name="OccupancyShopCombo"
+                              MinWidth="220"
+                              Margin="0,0,6,4"
+                              VerticalContentAlignment="Center"
+                              DisplayMemberPath="Display"
+                              SelectionChanged="OccupancyShop_SelectionChanged"/>
+                    <Button Content="刷新店铺"
+                            Style="{StaticResource GhostButton}"
+                            Padding="8,2"
+                            Margin="0,0,0,4"
+                            Click="RefreshShops_Click"/>
+                </WrapPanel>
+                <Expander IsExpanded="False" Margin="0,6,0,0">
+                    <Expander.Header>
+                        <TextBlock Text="计算公式 · 普货挂号包邮（展开后可改，失焦即保存并重算）"
+                                   Foreground="{StaticResource MutedBrush}"/>
+                    </Expander.Header>
+                    <ScrollViewer x:Name="FormulaScroll"
+                                  MaxHeight="300"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Margin="0,8,0,0">
+                        <StackPanel>
                             <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,8"
                                        Text="运费 = 重量kg × 售价续重 + 售价挂号&#10;无折扣售价 = (运费 + 成本) / (1 - 佣金 - 利润率) / 售价除数&#10;利润 = 无折扣售价 × (1 - 佣金) - 成本 - 运费&#10;速卖通售价 = 无折扣售价 / (1 - 店铺折扣) / 售价除数&#10;国家调价 = ((该国续重 - 调价续重) × 重量kg + (该国挂号 - 调价挂号)) / 调价除数 / (1 - 店铺折扣)&#10;比例国家 = 速卖通售价 × 比例（0.20 表示 20%）"/>
                             <WrapPanel Margin="0,0,0,8">
@@ -87,7 +182,7 @@
                                       CellEditEnding="FormulaGrid_CellEditEnding"/>
                             <TextBlock Text="按速卖通售价比例调价" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,8,0,4"/>
                             <DataGrid x:Name="PercentRateGrid"
-                                      Height="168"
+                                      Height="108"
                                       AutoGenerateColumns="False"
                                       CanUserAddRows="False"
                                       CanUserDeleteRows="False"
@@ -101,76 +196,10 @@
                                 </DataGrid.Columns>
                             </DataGrid>
                         </StackPanel>
-                    </Expander>
-                    <DockPanel Margin="0,0,0,8">
-                        <TextBlock DockPanel.Dock="Left"
-                                   Text="产品链接"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,10,0"
-                                   Foreground="{StaticResource TextBrush}"/>
-                        <TextBox x:Name="ProductUrlBox"
-                                 VerticalContentAlignment="Center"
-                                 LostFocus="ProductUrlBox_LostFocus"/>
-                    </DockPanel>
-                    <WrapPanel>
-                        <Button Content="打开速卖通产品详情页"
-                                Style="{StaticResource OrangeButton}"
-                                Click="OpenProduct_Click"
-                                ToolTip="用已导出 Cookie 打开 /web/smt/edit，并读取变种 SKU"/>
-                        <Button Content="检查SKU占用"
-                                Style="{StaticResource GhostButton}"
-                                Click="CheckOccupancy_Click"
-                                ToolTip="在在线产品列表按 SKU 编码搜索绿框里的全部状态，合计超过 1 条视为重复"/>
-                        <Button Content="搜索定价并回写"
-                                Style="{StaticResource SuccessButton}"
-                                Click="QuoteAndWrite_Click"
-                                ToolTip="用商品库参考价和重量，按普货挂号包邮公式计算，并把售价、重量、各国调价写入详情页"/>
-                        <Button Content="应用新SKU"
-                                Background="#0F766E"
-                                Click="ApplySuggestedSkus_Click"
-                                ToolTip="把已确认未占用的建议 SKU 写入详情页变种信息"/>
-                        <Button Content="恢复原SKU"
-                                Style="{StaticResource GhostButton}"
-                                Click="RestoreOriginalSkus_Click"
-                                Margin="0"
-                                ToolTip="把详情页中已替换的 SKU 恢复为原页面 SKU"/>
-                    </WrapPanel>
-                    <WrapPanel Margin="0,8,0,0">
-                        <TextBlock Text="查重范围"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextBrush}"
-                                   Margin="0,0,6,4"/>
-                        <ComboBox x:Name="OccupancyScopeCombo"
-                                  MinWidth="280"
-                                  Margin="0,0,14,4"
-                                  VerticalContentAlignment="Center"
-                                  SelectionChanged="OccupancyScope_SelectionChanged">
-                            <ComboBoxItem Content="全部（在线+草稿箱+已下架+审核中+审核不通过+疑似删除）"/>
-                            <ComboBoxItem Content="仅在线"/>
-                            <ComboBoxItem Content="仅草稿箱"/>
-                            <ComboBoxItem Content="仅已下架"/>
-                            <ComboBoxItem Content="仅审核中"/>
-                            <ComboBoxItem Content="仅审核不通过"/>
-                            <ComboBoxItem Content="仅疑似删除"/>
-                        </ComboBox>
-                        <TextBlock Text="查重店铺"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextBrush}"
-                                   Margin="0,0,6,4"/>
-                        <ComboBox x:Name="OccupancyShopCombo"
-                                  MinWidth="220"
-                                  Margin="0,0,6,4"
-                                  VerticalContentAlignment="Center"
-                                  DisplayMemberPath="Display"
-                                  SelectionChanged="OccupancyShop_SelectionChanged"/>
-                        <Button Content="刷新店铺列表"
-                                Style="{StaticResource GhostButton}"
-                                Padding="8,2"
-                                Margin="0,0,0,4"
-                                Click="RefreshShops_Click"/>
-                    </WrapPanel>
-                    <Expander IsExpanded="False"
-                              Margin="0,8,0,0">
+                    </ScrollViewer>
+                </Expander>
+                <Expander IsExpanded="False"
+                          Margin="0,4,0,0">
                         <Expander.Header>
                             <TextBlock Text="SKU 后缀（产品重复时使用）"
                                        Foreground="{StaticResource MutedBrush}"/>
@@ -221,7 +250,7 @@
                                                TextWrapping="Wrap"/>
                                 </Expander.Header>
                                 <ScrollViewer x:Name="OccupancyScroll"
-                                              MinHeight="280"
+                                              Height="400"
                                               VerticalScrollBarVisibility="Auto"
                                               HorizontalScrollBarVisibility="Disabled"
                                               Margin="0,6,0,0">
@@ -391,21 +420,23 @@
                             </Expander>
                         </StackPanel>
                     </Border>
-                </StackPanel>
-            </Border>
+            </StackPanel>
+        </Border>
 
-            <Border Background="{StaticResource PanelBrush}"
-                    BorderBrush="{StaticResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10">
-                <DataGrid x:Name="SkuGrid"
-                          MinHeight="280"
-                          Height="320"
-                          AutoGenerateColumns="False"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          HeadersVisibility="Column"
-                          GridLinesVisibility="Horizontal">
+        <Border Grid.Row="2"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="10">
+            <DataGrid x:Name="SkuGrid"
+                      Height="480"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="序号" Binding="{Binding Index}" IsReadOnly="True" Width="52"/>
                         <DataGridTextColumn Header="页面SKU" Binding="{Binding PageSku}" IsReadOnly="True" Width="160"/>
@@ -419,7 +450,31 @@
                         <DataGridTextColumn Header="状态" Binding="{Binding Status}" IsReadOnly="True" Width="*"/>
                     </DataGrid.Columns>
                 </DataGrid>
+        </Border>
+
+        <StackPanel Grid.Row="3" Margin="0,10,0,0">
+            <TextBlock Text="各国运费"
+                       FontWeight="SemiBold"
+                       Foreground="{StaticResource TextBrush}"
+                       Margin="2,0,0,4"/>
+            <Border Background="{StaticResource PanelBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                <DataGrid x:Name="FreightResultGrid"
+                          Height="260"
+                          IsReadOnly="True"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          CanUserSortColumns="False"
+                          FrozenColumnCount="3"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto"/>
             </Border>
         </StackPanel>
+    </Grid>
     </ScrollViewer>
 </UserControl>
