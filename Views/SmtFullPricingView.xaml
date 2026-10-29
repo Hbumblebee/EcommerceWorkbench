@@ -11,6 +11,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <DockPanel Grid.Row="0" Margin="0,0,0,8">
@@ -67,15 +68,19 @@
                                 Style="{StaticResource GhostButton}"
                                 Click="CheckOccupancy_Click"
                                 ToolTip="在在线产品列表按页面 SKU 搜索。在线、草稿箱、已下架、审核中、审核不通过、疑似删除合计超过 1 条视为重复"/>
+                        <Button Content="编辑半托管并查重"
+                                Style="{StaticResource GhostButton}"
+                                Click="EditSemiAndCheck_Click"
+                                ToolTip="进入 https://www.dianxiaomi.com/web/smt/editFromSmt 后，检查 SKU编码 和 货品编码 是否重复"/>
                         <Button Content="3  搜索并定价"
                                 Style="{StaticResource SuccessButton}"
                                 Click="SearchAndQuote_Click"
                                 ToolTip="按搜索 SKU 取商品库参考价和重量，算出速卖通售价和各国运费，先显示在表格里"/>
-                        <Button Content="4  回写"
+                        <Button Content="4  回写详情"
                                 Style="{StaticResource SuccessButton}"
                                 Click="WriteQuotes_Click"
                                 Margin="0"
-                                ToolTip="把已算出的售价、重量和各国无忧运费写入当前详情页"/>
+                                ToolTip="只把详情页表格里已算出的售价、重量和各国无忧运费写入产品详情页"/>
                     </WrapPanel>
                 </DockPanel>
                 <WrapPanel>
@@ -260,6 +265,22 @@
                                                 <Border BorderBrush="#FDE68A" BorderThickness="0,0,0,1" Padding="0,6,0,6">
                                                     <StackPanel>
                                                         <WrapPanel VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding ColumnLabel}"
+                                                                       FontWeight="SemiBold"
+                                                                       Foreground="#1D4ED8"
+                                                                       VerticalAlignment="Center"
+                                                                       Margin="0,0,8,4">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding ColumnLabel}" Value="">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
                                                             <TextBlock Text="{Binding Sku}"
                                                                        FontWeight="Bold"
                                                                        Foreground="#78350F"
@@ -475,6 +496,276 @@
                           VerticalScrollBarVisibility="Auto"/>
             </Border>
         </StackPanel>
+
+        <Border x:Name="SemiOccupancyPanel"
+                Grid.Row="4"
+                Visibility="Collapsed"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="12,10"
+                Margin="0,10,0,0">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,4">
+                    <Button DockPanel.Dock="Right"
+                            Content="回写半托管"
+                            Style="{StaticResource SuccessButton}"
+                            Margin="12,0,0,0"
+                            Click="WriteSemi_Click"
+                            ToolTip="只把半托管表格里的建议 SKU 和价格写入半托管页，不写详情页"/>
+                    <TextBlock Text="半托管 SKU 查重"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}"
+                               VerticalAlignment="Center"/>
+                </DockPanel>
+                <TextBlock x:Name="SemiOccupancyTitle"
+                           TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedBrush}"
+                           Margin="0,0,0,8"/>
+                <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="140"/>
+                        <ColumnDefinition Width="72"/>
+                        <ColumnDefinition Width="140"/>
+                        <ColumnDefinition Width="64"/>
+                        <ColumnDefinition Width="*" MinWidth="200"/>
+                        <ColumnDefinition Width="140"/>
+                        <ColumnDefinition Width="64"/>
+                        <ColumnDefinition Width="*" MinWidth="200"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Background="#E7E5E4" Padding="6,4"><TextBlock Text="搜索SKU" FontWeight="SemiBold"/></Border>
+                    <Border Grid.Column="1" Background="#E7E5E4" Padding="6,4"><TextBlock Text="价格" FontWeight="SemiBold"/></Border>
+                    <Border Grid.Column="2" Background="#D6E6F5" Padding="6,4"><TextBlock Text="SKU编码" FontWeight="SemiBold"/></Border>
+                    <Border Grid.Column="3" Background="#D6E6F5" Padding="6,4"><TextBlock Text="查重" FontWeight="SemiBold"/></Border>
+                    <Border Grid.Column="4" Background="#D6E6F5" Padding="6,4"><TextBlock Text="建议与后缀" FontWeight="SemiBold"/></Border>
+                    <Border Grid.Column="5" Background="#F8E6C8" Padding="6,4"><TextBlock Text="货品编码" FontWeight="SemiBold"/></Border>
+                    <Border Grid.Column="6" Background="#F8E6C8" Padding="6,4"><TextBlock Text="查重" FontWeight="SemiBold"/></Border>
+                    <Border Grid.Column="7" Background="#F8E6C8" Padding="6,4"><TextBlock Text="建议与后缀" FontWeight="SemiBold"/></Border>
+                </Grid>
+                <ScrollViewer x:Name="SemiOccupancyScroll"
+                              Height="840"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="SemiOccupancyList" HorizontalAlignment="Stretch">
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="72"/>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="64"/>
+                                        <ColumnDefinition Width="*" MinWidth="200"/>
+                                        <ColumnDefinition Width="140"/>
+                                        <ColumnDefinition Width="64"/>
+                                        <ColumnDefinition Width="*" MinWidth="200"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Background="#F5F5F4" Padding="6,4">
+                                        <TextBox Text="{Binding SearchSku, UpdateSourceTrigger=PropertyChanged}"
+                                                 Padding="4,2"
+                                                 VerticalContentAlignment="Center"
+                                                 ToolTip="查价格使用这一列"/>
+                                    </Border>
+                                    <Border Grid.Column="1" Background="#F5F5F4" Padding="6,4">
+                                        <TextBlock Text="{Binding PriceText}" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border Grid.Column="2" Background="#F3F8FC" Padding="6,4">
+                                        <TextBlock Text="{Binding SkuSide.Sku}" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border Grid.Column="3" Background="#F3F8FC" Padding="6,4">
+                                        <TextBlock Text="{Binding SkuSide.OccupancyResult}" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border Grid.Column="4" Background="#F3F8FC" Padding="6,4">
+                                        <StackPanel DataContext="{Binding SkuSide}">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasHits}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <TextBox Text="{Binding SuggestedSku, UpdateSourceTrigger=PropertyChanged}"
+                                                     Margin="0,0,0,4" Padding="4,2"
+                                                     TextChanged="SuggestedSku_TextChanged"
+                                                     LostFocus="SuggestedSku_LostFocus"/>
+                                            <CheckBox Content="启用颜色后缀" Margin="0,0,0,4"
+                                                      IsChecked="{Binding UseColorSuffix, Mode=TwoWay}"
+                                                      Checked="UseColorSuffix_Changed"
+                                                      Unchecked="UseColorSuffix_Changed"/>
+                                            <ItemsControl ItemsSource="{Binding Parts}">
+                                                <ItemsControl.Style>
+                                                    <Style TargetType="ItemsControl">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding UseColorSuffix}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding HasMultipleParts}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ItemsControl.Style>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <WrapPanel Margin="0,0,0,4">
+                                                            <TextBlock Text="{Binding Label}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                            <ComboBox ItemsSource="{Binding Owner.ColorOptions}"
+                                                                      SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
+                                                                      MinWidth="110" Margin="0,0,6,0"
+                                                                      SelectionChanged="ColorSuffixCombo_SelectionChanged">
+                                                                <ComboBox.Style>
+                                                                    <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Owner.UseColorSuffix}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </ComboBox.Style>
+                                                            </ComboBox>
+                                                            <CheckBox Content="启用通用后缀" VerticalAlignment="Center"
+                                                                      IsChecked="{Binding UseGeneralSuffix, Mode=TwoWay}"
+                                                                      Checked="UseGeneralSuffix_Changed"
+                                                                      Unchecked="UseGeneralSuffix_Changed">
+                                                                <CheckBox.Style>
+                                                                    <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Owner.HasMultipleParts}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </CheckBox.Style>
+                                                            </CheckBox>
+                                                        </WrapPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock Text="{Binding SuggestStatus}" TextWrapping="Wrap" Foreground="#A16207"/>
+                                            <ItemsControl ItemsSource="{Binding Hits}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock TextWrapping="Wrap" Margin="0,1,0,1">
+                                                            <Run Text="{Binding Summary}"/>
+                                                            <Run Text=" "/>
+                                                            <Hyperlink Click="OccupancyLink_Click" Tag="{Binding EditUrl}">打开该产品</Hyperlink>
+                                                        </TextBlock>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="5" Background="#FFF8EE" Padding="6,4">
+                                        <TextBlock Text="{Binding ItemSide.Sku}" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border Grid.Column="6" Background="#FFF8EE" Padding="6,4">
+                                        <TextBlock Text="{Binding ItemSide.OccupancyResult}" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border Grid.Column="7" Background="#FFF8EE" Padding="6,4">
+                                        <StackPanel DataContext="{Binding ItemSide}">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding HasHits}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <TextBox Text="{Binding SuggestedSku, UpdateSourceTrigger=PropertyChanged}"
+                                                     Margin="0,0,0,4" Padding="4,2"
+                                                     TextChanged="SuggestedSku_TextChanged"
+                                                     LostFocus="SuggestedSku_LostFocus"/>
+                                            <CheckBox Content="启用颜色后缀" Margin="0,0,0,4"
+                                                      IsChecked="{Binding UseColorSuffix, Mode=TwoWay}"
+                                                      Checked="UseColorSuffix_Changed"
+                                                      Unchecked="UseColorSuffix_Changed"/>
+                                            <ItemsControl ItemsSource="{Binding Parts}">
+                                                <ItemsControl.Style>
+                                                    <Style TargetType="ItemsControl">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding UseColorSuffix}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding HasMultipleParts}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </ItemsControl.Style>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <WrapPanel Margin="0,0,0,4">
+                                                            <TextBlock Text="{Binding Label}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                            <ComboBox ItemsSource="{Binding Owner.ColorOptions}"
+                                                                      SelectedItem="{Binding SelectedColor, Mode=TwoWay}"
+                                                                      MinWidth="110" Margin="0,0,6,0"
+                                                                      SelectionChanged="ColorSuffixCombo_SelectionChanged">
+                                                                <ComboBox.Style>
+                                                                    <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Owner.UseColorSuffix}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </ComboBox.Style>
+                                                            </ComboBox>
+                                                            <CheckBox Content="启用通用后缀" VerticalAlignment="Center"
+                                                                      IsChecked="{Binding UseGeneralSuffix, Mode=TwoWay}"
+                                                                      Checked="UseGeneralSuffix_Changed"
+                                                                      Unchecked="UseGeneralSuffix_Changed">
+                                                                <CheckBox.Style>
+                                                                    <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Owner.HasMultipleParts}" Value="True">
+                                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </CheckBox.Style>
+                                                            </CheckBox>
+                                                        </WrapPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock Text="{Binding SuggestStatus}" TextWrapping="Wrap" Foreground="#A16207"/>
+                                            <ItemsControl ItemsSource="{Binding Hits}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock TextWrapping="Wrap" Margin="0,1,0,1">
+                                                            <Run Text="{Binding Summary}"/>
+                                                            <Run Text=" "/>
+                                                            <Hyperlink Click="OccupancyLink_Click" Tag="{Binding EditUrl}">打开该产品</Hyperlink>
+                                                        </TextBlock>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </StackPanel>
+        </Border>
     </Grid>
     </ScrollViewer>
 </UserControl>

@@ -8,6 +8,9 @@
  *           2026-10-22 区域调价按变种 id 同步，并刷新 vxe 表格里的各国单元格
  *           2026-10-22 回写脚本改为直接返回结果，避免 Promise 被读成 0 条
  *           2026-10-23 各国无忧运费直接写入区域调价表正在显示的单元格
+ *           2026-10-24 半托管页固定为 /web/smt/editFromSmt，并读取表格里的 SKU编码、货品编码
+ *           2026-10-24 回写半托管 SKU 和产品价格
+ *           2026-10-24 已打开半托管页时按页面地址识别，避免被详情页地址覆盖
  */
 
 using System.IO;
@@ -46,11 +49,16 @@ public partial class SmtFullProductPageWindow : Window
         => Browser.Source is not null
            && Uri.Compare(Browser.Source, url, UriComponents.HttpRequestUrl, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
 
+    public async Task PrepareAsync(IReadOnlyList<CookieRecord> cookies)
+    {
+        await EnsureCoreAsync();
+        InjectCookies(cookies);
+    }
+
     public async Task OpenProductAsync(Uri url, IReadOnlyList<CookieRecord> cookies)
     {
         HintText.Text = "正在加载：" + url;
-        await EnsureCoreAsync();
-        InjectCookies(cookies);
+        await PrepareAsync(cookies);
         Browser.Source = url;
     }
 
@@ -89,6 +97,140 @@ public partial class SmtFullProductPageWindow : Window
     }
 
     public void SetHint(string text) => HintText.Text = text;
+
+    /// <summary>
+    /// 在已打开的速卖通编辑页点击「编辑半托管信息」，等半托管页出现后读取 SKU编码 和 货品编码。
+    /// </summary>
+    public async Task<SmtSemiSkuReadResult> JumpToSemiAndReadSkusAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureCoreAsync();
+        if (Browser.CoreWebView2 is null)
+            return new SmtSemiSkuReadResult { Error = "产品详情页尚未初始化。" };
+
+        var clicked = false;
+        string? lastHref = null;
+        for (var i = 0; i < 40; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var probe = await TryReadSemiSkusAsync();
+            lastHref = probe.Href ?? lastHref;
+            if (probe.Rows is not null)
+                return new SmtSemiSkuReadResult { Rows = probe.Rows };
+
+            if (!clicked)
+            {
+                var state = await ReadScriptStringAsync(ClickSemiButtonScript);
+                if (state == "clicked" || state == "already")
+                    clicked = true;
+                else if (i == 30)
+                    return new SmtSemiSkuReadResult { Error = "详情页上没有找到「编辑半托管信息」。请确认该产品可以参与半托管，并且页面已经加载完成。" };
+            }
+
+            await Task.Delay(500, cancellationToken);
+        }
+
+        var where = string.IsNullOrWhiteSpace(lastHref) ? "" : " 当前页面：" + lastHref;
+        return new SmtSemiSkuReadResult
+        {
+            Error = "没有进入半托管页 https://www.dianxiaomi.com/web/smt/editFromSmt，或页面上还没有 SKU编码、货品编码。" + where
+        };
+    }
+
+    private async Task<(List<SmtSemiSkuRow>? Rows, string? Href)> TryReadSemiSkusAsync()
+    {
+        if (Browser.CoreWebView2 is null)
+            return (null, null);
+        var raw = await Browser.CoreWebView2.ExecuteScriptAsync(ReadSemiSkuScript);
+        var json = UnwrapExecuteScriptResult(raw);
+        if (string.IsNullOrWhiteSpace(json))
+            return (null, null);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var href = doc.RootElement.TryGetProperty("href", out var hrefEl) ? hrefEl.GetString() : null;
+            if (!doc.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
+                return (null, href);
+            if (!doc.RootElement.TryGetProperty("rows", out var rowsEl) || rowsEl.ValueKind != JsonValueKind.Array)
+                return (null, href);
+            var rows = new List<SmtSemiSkuRow>();
+            foreach (var item in rowsEl.EnumerateArray())
+            {
+                rows.Add(new SmtSemiSkuRow
+                {
+                    SkuCode = item.TryGetProperty("skuCode", out var skuEl) ? skuEl.GetString() ?? "" : "",
+                    ItemCode = item.TryGetProperty("scItemCode", out var itemEl) ? itemEl.GetString() ?? "" : ""
+                });
+            }
+
+            return (rows, href);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    public async Task<bool> IsOnSemiPageAsync()
+    {
+        var location = await ReadSemiLocationAsync();
+        return location.OnSemi;
+    }
+
+    private async Task<(bool OnSemi, string Href)> ReadSemiLocationAsync()
+    {
+        await EnsureCoreAsync();
+        if (Browser.CoreWebView2 is null)
+            return (false, "");
+
+        var json = await ReadScriptStringAsync("""
+            (function () {
+              const path = String(location.pathname || '').replace(/\/+$/, '');
+              const hash = String(location.hash || '');
+              const onSemi = /\/web\/smt\/editFromSmt$/i.test(path) || /editFromSmt/i.test(hash);
+              return { onSemi: onSemi, href: location.href || '' };
+            })();
+            """);
+        if (string.IsNullOrWhiteSpace(json))
+            return (false, "");
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var onSemi = doc.RootElement.TryGetProperty("onSemi", out var onEl) && onEl.ValueKind == JsonValueKind.True;
+            var href = doc.RootElement.TryGetProperty("href", out var hrefEl) ? hrefEl.GetString() ?? "" : "";
+            return (onSemi, href);
+        }
+        catch
+        {
+            return (false, "");
+        }
+    }
+
+    /// <summary>把半托管行的 SKU 和产品价格写回 editFromSmt 页面。</summary>
+    public async Task<SmtFullPageWriteResult> WriteSemiSkusAsync(string json, CancellationToken cancellationToken = default)
+    {
+        await EnsureCoreAsync();
+        if (Browser.CoreWebView2 is null)
+            return new SmtFullPageWriteResult { Error = "半托管页尚未打开。" };
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var location = await ReadSemiLocationAsync();
+        if (!location.OnSemi)
+        {
+            var where = string.IsNullOrWhiteSpace(location.Href) ? "" : " 当前页面：" + location.Href;
+            return new SmtFullPageWriteResult { Error = "当前不是半托管页，无法回写 SKU 和价格。" + where };
+        }
+
+        var raw = await Browser.CoreWebView2.ExecuteScriptAsync(WriteSemiScriptPrefix + json + WriteSemiScriptSuffix);
+        return ParseWriteResult(raw);
+    }
+
+    private async Task<string> ReadScriptStringAsync(string script)
+    {
+        if (Browser.CoreWebView2 is null)
+            return "";
+        var raw = await Browser.CoreWebView2.ExecuteScriptAsync(script);
+        return UnwrapExecuteScriptResult(raw);
+    }
 
     private async Task EnsureCoreAsync()
     {
@@ -346,6 +488,199 @@ public partial class SmtFullProductPageWindow : Window
             if (!seen[key]) missed.push(key);
           }
           return { updated: updated, verified: verified, missed: missed };
+        })();
+        """;
+
+    private const string ClickSemiButtonScript = """
+        (function () {
+          function onSemiPage() {
+            const path = String(location.pathname || '').replace(/\/+$/, '');
+            const hash = String(location.hash || '');
+            return /\/web\/smt\/editFromSmt$/i.test(path) || /editFromSmt/i.test(hash);
+          }
+          if (onSemiPage()) return 'already';
+          const nodes = document.querySelectorAll('button, a, div, span');
+          for (const el of nodes) {
+            const text = String(el.innerText || el.textContent || '').replace(/\s+/g, '');
+            if (text !== '编辑半托管信息') continue;
+            const target = el.closest('button, .btn-green, .ant-btn') || el;
+            target.scrollIntoView({ block: 'center' });
+            target.click();
+            return 'clicked';
+          }
+          return 'missing';
+        })();
+        """;
+
+    private const string ReadSemiSkuScript = """
+        (function () {
+          const href = location.href;
+          const path = String(location.pathname || '').replace(/\/+$/, '');
+          const hash = String(location.hash || '');
+          const onSemi = /\/web\/smt\/editFromSmt$/i.test(path) || /editFromSmt/i.test(hash);
+          if (!onSemi) return { ok: false, href: href, rows: [] };
+          function cellText(cell) {
+            if (!cell) return '';
+            const input = cell.querySelector('input, textarea');
+            if (input) return String(input.value || '').trim();
+            return String(cell.innerText || '').replace(/\s+/g, ' ').trim();
+          }
+          function fromTable() {
+            const tables = document.querySelectorAll('table');
+            for (const table of tables) {
+              const heads = [...table.querySelectorAll('thead th')];
+              if (!heads.length) continue;
+              const texts = heads.map(th => String(th.innerText || '').replace(/\s+/g, ''));
+              const skuCol = texts.findIndex(text => text.includes('SKU编码'));
+              const itemCol = texts.findIndex(text => text.includes('货品编码') && !text.includes('条码'));
+              if (skuCol < 0 || itemCol < 0) continue;
+              const rows = [];
+              for (const tr of table.querySelectorAll('tbody tr')) {
+                const cells = [...tr.children];
+                const skuCode = cellText(cells[skuCol]);
+                const scItemCode = cellText(cells[itemCol]);
+                if (!skuCode && !scItemCode) continue;
+                rows.push({ skuCode: skuCode, scItemCode: scItemCode });
+              }
+              if (rows.length) return rows;
+            }
+            return null;
+          }
+          function looks(list) {
+            return Array.isArray(list) && list.length > 0 && list[0]
+              && Object.prototype.hasOwnProperty.call(list[0], 'skuCode')
+              && (Object.prototype.hasOwnProperty.call(list[0], 'scItemCode')
+                  || Object.prototype.hasOwnProperty.call(list[0], 'scItemBarCode'));
+          }
+          function fromBag(bag) {
+            if (!bag) return null;
+            let keys = [];
+            try { keys = Object.keys(bag); } catch (err) { return null; }
+            for (const key of keys) {
+              let val;
+              try { val = bag[key]; } catch (err) { continue; }
+              const list = Array.isArray(val) ? val : (val && Array.isArray(val.value) ? val.value : null);
+              if (looks(list)) return list;
+            }
+            return null;
+          }
+          function walk(inst, seen, depth) {
+            if (!inst || depth > 40 || seen.has(inst)) return null;
+            seen.add(inst);
+            const hit = fromBag(inst.setupState) || fromBag(inst.props) || fromBag(inst.data);
+            if (hit) return hit;
+            const tree = inst.subTree;
+            if (!tree) return null;
+            const queue = [tree];
+            while (queue.length) {
+              const vnode = queue.shift();
+              if (!vnode || typeof vnode !== 'object') continue;
+              if (vnode.component) {
+                const nested = walk(vnode.component, seen, depth + 1);
+                if (nested) return nested;
+              }
+              const children = vnode.children;
+              if (Array.isArray(children)) {
+                for (const child of children) {
+                  if (child && typeof child === 'object') queue.push(child);
+                }
+              }
+            }
+            return null;
+          }
+          const app = document.querySelector('#app');
+          const root = app && app.__vue_app__ && app.__vue_app__._instance;
+          const list = root ? walk(root, new Set(), 0) : null;
+          const rows = list
+            ? list.map(row => ({
+                skuCode: String(row.skuCode || '').trim(),
+                scItemCode: String(row.scItemCode || '').trim()
+              }))
+            : fromTable();
+          if (!rows || !rows.length) return { ok: false, href: href, rows: [] };
+          return { ok: true, href: href, rows: rows };
+        })();
+        """;
+
+    private const string WriteSemiScriptPrefix = """
+        (function () {
+          const payload =
+        """;
+
+    private const string WriteSemiScriptSuffix = """
+        ;
+          function looks(list) {
+            return Array.isArray(list) && list.length > 0 && list[0]
+              && Object.prototype.hasOwnProperty.call(list[0], 'skuCode')
+              && (Object.prototype.hasOwnProperty.call(list[0], 'scItemCode')
+                  || Object.prototype.hasOwnProperty.call(list[0], 'basePrice'));
+          }
+          function fromBag(bag) {
+            if (!bag) return null;
+            let keys = [];
+            try { keys = Object.keys(bag); } catch (err) { return null; }
+            for (const key of keys) {
+              let val;
+              try { val = bag[key]; } catch (err) { continue; }
+              const list = Array.isArray(val) ? val : (val && Array.isArray(val.value) ? val.value : null);
+              if (looks(list)) return list;
+            }
+            return null;
+          }
+          function walk(inst, seen, depth) {
+            if (!inst || depth > 40 || seen.has(inst)) return null;
+            seen.add(inst);
+            const hit = fromBag(inst.setupState) || fromBag(inst.props) || fromBag(inst.data);
+            if (hit) return hit;
+            const tree = inst.subTree;
+            if (!tree) return null;
+            const queue = [tree];
+            while (queue.length) {
+              const vnode = queue.shift();
+              if (!vnode || typeof vnode !== 'object') continue;
+              if (vnode.component) {
+                const nested = walk(vnode.component, seen, depth + 1);
+                if (nested) return nested;
+              }
+              const children = vnode.children;
+              if (Array.isArray(children)) {
+                for (const child of children) {
+                  if (child && typeof child === 'object') queue.push(child);
+                }
+              }
+            }
+            return null;
+          }
+          const app = document.querySelector('#app');
+          const root = app && app.__vue_app__ && app.__vue_app__._instance;
+          const list = root ? walk(root, new Set(), 0) : null;
+          const writes = (payload && payload.rows) || [];
+          if (!list) return { updated: 0, verified: 0, adjustUpdated: 0, missed: writes.map(r => r.skuCode || r.scItemCode), error: '未找到半托管变种表' };
+          let updated = 0;
+          const missed = [];
+          for (const write of writes) {
+            const skuCode = String(write.skuCode || '').trim();
+            const itemCode = String(write.scItemCode || '').trim();
+            const row = list.find(item => {
+              const sku = String(item.skuCode || '').trim();
+              const itemCodeNow = String(item.scItemCode || '').trim();
+              return (skuCode && sku === skuCode) || (!skuCode && itemCode && itemCodeNow === itemCode);
+            });
+            if (!row) {
+              missed.push(skuCode || itemCode);
+              continue;
+            }
+            const newSku = String(write.newSkuCode || '').trim();
+            const newItem = String(write.newItemCode || '').trim();
+            if (newSku) row.skuCode = newSku;
+            if (newItem) row.scItemCode = newItem;
+            if (write.price !== null && write.price !== undefined && write.price !== '') {
+              const price = Number(write.price);
+              if (Number.isFinite(price)) row.basePrice = price.toFixed(2);
+            }
+            updated += 1;
+          }
+          return { updated: updated, verified: updated, adjustUpdated: 0, missed: missed, error: missed.length ? '部分半托管行未匹配' : '' };
         })();
         """;
 
@@ -696,6 +1031,18 @@ public partial class SmtFullProductPageWindow : Window
           };
         })();
         """;
+}
+
+public sealed class SmtSemiSkuRow
+{
+    public string SkuCode { get; init; } = "";
+    public string ItemCode { get; init; } = "";
+}
+
+public sealed class SmtSemiSkuReadResult
+{
+    public List<SmtSemiSkuRow> Rows { get; init; } = [];
+    public string? Error { get; init; }
 }
 
 public sealed class SmtFullPageWriteResult

@@ -19,6 +19,15 @@
  *           2026-10-24 打开详情后不再自动查重
  *           2026-10-24 SKU 表下方展示各国运费
  *           2026-10-24 定价并回写拆成搜索并定价、回写
+ *           2026-10-24 编辑半托管信息后检查 SKU编码 和 货品编码 是否重复
+ *           2026-10-24 半托管查重拆成 SKU 后缀区和 SKU 表格区
+ *           2026-10-24 半托管表格按 SKU编码、货品编码分成两列区域
+ *           2026-10-24 半托管查重改为分色列表，行内可开关颜色后缀并选择后缀
+ *           2026-10-24 半托管查重列表高度改为 840
+ *           2026-10-24 半托管查重列表宽度撑满所在区域
+ *           2026-10-24 半托管表增加搜索SKU，按该列查价格并支持回写
+ *           2026-10-24 半托管回写与详情页回写分开
+ *           2026-10-24 已打开半托管页时直接回写，不再跳回详情页
  */
 
 using System.Collections.ObjectModel;
@@ -60,6 +69,8 @@ public partial class SmtFullPricingView : UserControl
     private string? _openedShopId;
     private readonly List<SmtFullProductPageWindow> _occupancyWindows = [];
     private readonly ObservableCollection<SmtFullOccupancyGroup> _occupancies = [];
+    private readonly ObservableCollection<SmtFullOccupancyGroup> _semiOccupancies = [];
+    private readonly ObservableCollection<SmtSemiLineRow> _semiLines = [];
     private readonly ObservableCollection<string> _detailProbes = [];
     private readonly HashSet<string> _verifiedSkus = new(StringComparer.OrdinalIgnoreCase);
     private readonly ObservableCollection<SmtShopOption> _shopOptions = [];
@@ -92,6 +103,10 @@ public partial class SmtFullPricingView : UserControl
         FreightRateGrid.ItemsSource = _freightSheetRows;
         PercentRateGrid.ItemsSource = _percentRates;
         OccupancyList.ItemsSource = _occupancies;
+        SemiOccupancyList.ItemsSource = _semiLines;
+        TableRegionCopy.EnableDataGrid(SkuGrid);
+        TableRegionCopy.EnableDataGrid(FreightResultGrid);
+        TableRegionCopy.EnableSemiList(SemiOccupancyPanel);
         DetailProbeList.ItemsSource = _detailProbes;
         OccupancyShopCombo.ItemsSource = _shopOptions;
         Loaded += SmtFullPricingView_Loaded;
@@ -151,6 +166,10 @@ public partial class SmtFullPricingView : UserControl
         {
             target = freightResultScroll;
             step = WheelScrollHelper.LinesPerNotch();
+        }
+        else if (SemiOccupancyScroll.IsMouseOver && WheelScrollHelper.CanScroll(SemiOccupancyScroll, e.Delta))
+        {
+            target = SemiOccupancyScroll;
         }
         else if (OccupancyScroll.IsMouseOver && WheelScrollHelper.CanScroll(OccupancyScroll, e.Delta))
         {
@@ -295,7 +314,7 @@ public partial class SmtFullPricingView : UserControl
         }
     }
 
-    private async Task OpenProductWindowAsync(Uri url, IReadOnlyList<CookieRecord> cookies, bool reload = true)
+    private async Task EnsureProductWindowAsync(IReadOnlyList<CookieRecord> cookies)
     {
         if (_productWindow is null)
         {
@@ -311,9 +330,16 @@ public partial class SmtFullPricingView : UserControl
             _productWindow.Show();
         }
 
+        await _productWindow.PrepareAsync(cookies);
+    }
+
+    private async Task OpenProductWindowAsync(Uri url, IReadOnlyList<CookieRecord> cookies, bool reload = true)
+    {
+        await EnsureProductWindowAsync(cookies);
+        var window = _productWindow ?? throw new InvalidOperationException("产品详情窗口没有打开。");
         ArmMainWindowInFront();
-        if (reload || !_productWindow.IsShowing(url))
-            await _productWindow.OpenProductAsync(url, cookies);
+        if (reload || !window.IsShowing(url))
+            await window.OpenProductAsync(url, cookies);
 
         BringMainWindowToFront();
     }
@@ -877,9 +903,15 @@ public partial class SmtFullPricingView : UserControl
         CommitGrid();
         CommitFormulaEdits();
         var skus = CollectSearchSkus();
+        foreach (var line in _semiLines)
+        {
+            var sku = NormalizeSku(line.SearchSku);
+            if (sku.Length > 0 && !skus.Contains(sku, StringComparer.OrdinalIgnoreCase))
+                skus.Add(sku);
+        }
         if (skus.Count == 0)
         {
-            MessageBox.Show("请先打开产品详情读取 SKU，或在「搜索SKU」列填写要查询的货号。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("请先打开产品详情或完成半托管查重，并在「搜索SKU」列填写要查询的货号。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -901,13 +933,14 @@ public partial class SmtFullPricingView : UserControl
         {
             SetStatus($"正在按 {skus.Count} 个搜索 SKU 查询参考价和重量…");
             var outcome = await _productSearch.SearchAsync(skus, cookieHeader);
-            var priced = ApplySearchAndCalculate(outcome);
-            var hint = priced == 0
-                ? "没有算出售价。未命中或缺少价格/重量的 SKU 已标在表格状态列。"
-                : $"已定价 {priced} 个 SKU。请核对售价和各国运费，确认后点「回写」。";
+            var priced = _rows.Count == 0 ? 0 : ApplySearchAndCalculate(outcome);
+            var semiPriced = ApplySemiPrices(outcome);
+            var hint = priced == 0 && semiPriced == 0
+                ? "没有查到价格。未命中的 SKU 已留空。"
+                : $"已定价 {priced} 个详情 SKU，查到半托管价格 {semiPriced} 个。请核对后点「回写」。";
             SetStatus(hint);
             UpdateCount();
-            if (priced == 0)
+            if (priced == 0 && semiPriced == 0)
                 MessageBox.Show(hint, "搜索并定价", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
@@ -917,6 +950,87 @@ public partial class SmtFullPricingView : UserControl
                 CookieInvalidated?.Invoke(this, ex.Message);
             else
                 MessageBox.Show(ex.Message, "搜索定价失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async void WriteSemi_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+            return;
+
+        var semiWrites = CollectSemiWrites();
+        if (semiWrites.Count == 0)
+        {
+            MessageBox.Show("还没有可回写的半托管 SKU 或价格。请先完成半托管查重，并用「搜索并定价」查出价格。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var cookies = GetCookieRecords();
+        if (string.IsNullOrWhiteSpace(GetCookieHeader()) || cookies is null || cookies.Count == 0)
+        {
+            MessageBox.Show("请先在「店小秘搜索」登录并导出 Cookie。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var editUrl = _openedEditUrl;
+        if (string.IsNullOrWhiteSpace(editUrl)
+            && SmtProductService.TryParseProduct(ProductUrlBox.Text, out _, out var parsedUrl))
+        {
+            editUrl = parsedUrl;
+        }
+
+        if (string.IsNullOrWhiteSpace(editUrl))
+        {
+            MessageBox.Show("请先打开速卖通产品详情页。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            SetStatus($"正在把 {semiWrites.Count} 行 SKU 和价格写入半托管页…");
+            await EnsureProductWindowAsync(cookies);
+            if (!await _productWindow!.IsOnSemiPageAsync())
+            {
+                if (!_productWindow.IsShowing(new Uri(editUrl)))
+                    await _productWindow.OpenProductAsync(new Uri(editUrl), cookies);
+
+                var read = await _productWindow.JumpToSemiAndReadSkusAsync();
+                if (!await _productWindow.IsOnSemiPageAsync())
+                {
+                    var message = string.IsNullOrWhiteSpace(read.Error)
+                        ? "没有停留在半托管页，无法回写。"
+                        : read.Error;
+                    SetStatus(message);
+                    MessageBox.Show(message, "回写半托管", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+            }
+
+            var semiJson = JsonSerializer.Serialize(new { rows = semiWrites });
+            var result = await _productWindow.WriteSemiSkusAsync(semiJson);
+            var missed = result.MissedPageSkus.Count == 0
+                ? ""
+                : " 未匹配：" + string.Join("、", result.MissedPageSkus.Take(12));
+            var hint = $"已回写半托管 {result.Updated} 行 SKU 和价格。请在半托管页面确认后保存。{missed}";
+            if (!string.IsNullOrWhiteSpace(result.Error))
+                hint += " " + result.Error;
+            _productWindow.SetHint(hint);
+            SetStatus(hint);
+            if (result.Updated == 0 || !string.IsNullOrWhiteSpace(result.Error))
+                MessageBox.Show(hint, "回写半托管", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            SetStatus("回写半托管失败：" + ex.Message);
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
+                CookieInvalidated?.Invoke(this, ex.Message);
+            else
+                MessageBox.Show(ex.Message, "回写半托管失败", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
         {
@@ -934,7 +1048,7 @@ public partial class SmtFullPricingView : UserControl
         var priced = CollectWriteRows();
         if (priced.Count == 0)
         {
-            MessageBox.Show("还没有可回写的售价。请先点「搜索并定价」。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("还没有可回写的详情页售价。请先点「搜索并定价」。半托管请用下方「回写半托管」。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -1086,6 +1200,66 @@ public partial class SmtFullPricingView : UserControl
         return payload;
     }
 
+    /// <summary>半托管行按搜索 SKU 填入商品库参考价。</summary>
+    private int ApplySemiPrices(ProductSearchOutcome outcome)
+    {
+        var bySku = new Dictionary<string, ProductResultRow>(StringComparer.OrdinalIgnoreCase);
+        foreach (var hit in outcome.Rows)
+        {
+            var key = NormalizeSku(hit.Sku);
+            if (key.Length > 0)
+                bySku.TryAdd(key, hit);
+        }
+
+        var priced = 0;
+        foreach (var line in _semiLines)
+        {
+            var key = NormalizeSku(line.SearchSku);
+            line.Price = null;
+            if (key.Length == 0 || !bySku.TryGetValue(key, out var hit) || hit.Price is null)
+                continue;
+            line.Price = (double)hit.Price.Value;
+            priced++;
+        }
+
+        return priced;
+    }
+
+    /// <summary>半托管回写：建议 SKU 写入对应列，参考价写入产品价格。</summary>
+    private List<object> CollectSemiWrites()
+    {
+        var payload = new List<object>();
+        foreach (var line in _semiLines)
+        {
+            var skuCode = line.SkuSide?.Sku ?? "";
+            var itemCode = line.ItemSide?.Sku ?? "";
+            if (skuCode.Length == 0 && itemCode.Length == 0)
+                continue;
+            var newSku = SkuToWrite(line.SkuSide);
+            var newItem = SkuToWrite(line.ItemSide);
+            if (line.Price is null && newSku == skuCode && newItem == itemCode)
+                continue;
+            payload.Add(new
+            {
+                skuCode,
+                scItemCode = itemCode,
+                newSkuCode = newSku,
+                newItemCode = newItem,
+                price = line.Price
+            });
+        }
+
+        return payload;
+    }
+
+    private static string SkuToWrite(SmtFullOccupancyGroup? side)
+    {
+        if (side is null)
+            return "";
+        var suggested = NormalizeSku(side.SuggestedSku);
+        return suggested.Length > 0 ? suggested : side.Sku;
+    }
+
     private async void CheckOccupancy_Click(object sender, RoutedEventArgs e)
     {
         if (_busy)
@@ -1124,7 +1298,206 @@ public partial class SmtFullPricingView : UserControl
         }
     }
 
-    private async Task<string> DescribeOccupancyAsync(IReadOnlyList<string> skus)
+    private async void EditSemiAndCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+            return;
+
+        PersistProductUrl();
+        if (!SmtProductService.TryParseProduct(ProductUrlBox.Text, out var productId, out var editUrl))
+        {
+            MessageBox.Show(
+                "请填写店小秘速卖通产品编辑链接，例如：\nhttps://www.dianxiaomi.com/web/smt/edit?id=184807708954397661",
+                "提示",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var cookieHeader = GetCookieHeader();
+        var cookies = GetCookieRecords();
+        if (string.IsNullOrWhiteSpace(cookieHeader) || cookies is null || cookies.Count == 0)
+        {
+            MessageBox.Show("请先在「店小秘搜索」登录并导出 Cookie。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_openedShopId) || !string.Equals(_openedEditUrl, editUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                var detail = await _productService.GetDetailAsync(productId, cookieHeader);
+                _openedEditUrl = editUrl;
+                _openedProductId = productId;
+                _openedShopId = detail.ShopId;
+                EnsureCurrentShopOption();
+            }
+
+            SetStatus("正在进入半托管页 https://www.dianxiaomi.com/web/smt/editFromSmt …");
+            await OpenProductWindowAsync(new Uri(editUrl), cookies, reload: false);
+            ArmMainWindowInFront();
+            var read = await _productWindow!.JumpToSemiAndReadSkusAsync();
+            if (!string.IsNullOrWhiteSpace(read.Error))
+            {
+                SetStatus(read.Error);
+                MessageBox.Show(read.Error, "编辑半托管信息", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (read.Rows.All(row => row.SkuCode.Length == 0 && row.ItemCode.Length == 0))
+            {
+                SetStatus("半托管页面已打开，但 SKU编码 和 货品编码 都是空的。");
+                return;
+            }
+
+            var skuCount = read.Rows.Count(row => row.SkuCode.Length > 0);
+            var itemCount = read.Rows.Count(row => row.ItemCode.Length > 0);
+            var summary = await DescribeSemiOccupancyAsync(read.Rows);
+            SetStatus($"半托管 SKU编码 {skuCount} 个、货品编码 {itemCount} 个。" + summary);
+            BringMainWindowToFront();
+        }
+        catch (Exception ex)
+        {
+            SetStatus("编辑半托管并查重失败：" + ex.Message);
+            if (CookieErrorDetector.IsAuthFailure(ex.Message))
+                CookieInvalidated?.Invoke(this, ex.Message);
+            else
+                MessageBox.Show(ex.Message, "编辑半托管并查重失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _busy = false;
+            BringMainWindowToFront();
+        }
+    }
+
+    private async Task<string> DescribeSemiOccupancyAsync(IReadOnlyList<SmtSemiSkuRow> lines)
+    {
+        _suggestGeneration++;
+        _semiOccupancies.Clear();
+        _semiLines.Clear();
+        SemiOccupancyTitle.Text = "正在检查半托管 SKU…";
+        SemiOccupancyPanel.Visibility = Visibility.Visible;
+
+        var cookieHeader = GetCookieHeader();
+        if (string.IsNullOrWhiteSpace(cookieHeader) || lines.Count == 0)
+            return "未检查半托管 SKU。";
+
+        var shopId = ResolveOccupancyShopId();
+        if (shopId.Length == 0)
+            return "请先选择「查重店铺」（可点「刷新店铺列表」后再选）。";
+
+        var byCode = new Dictionary<string, SmtFullOccupancyGroup>(StringComparer.OrdinalIgnoreCase);
+        SmtFullOccupancyGroup GroupFor(string code, string label)
+        {
+            if (byCode.TryGetValue(code, out var existing))
+            {
+                if (!existing.ColumnLabel.Contains(label, StringComparison.Ordinal))
+                    existing.ColumnLabel += "、" + label;
+                return existing;
+            }
+
+            var stripped = JoomSkuSuffix.StripCompositeTrailingSuffix(code, OccupancySuffixes);
+            var group = new SmtFullOccupancyGroup(code, stripped, JoomSkuSuffix.SplitParts(stripped))
+            {
+                ColumnLabel = label
+            };
+            byCode[code] = group;
+            _semiOccupancies.Add(group);
+            return group;
+        }
+
+        foreach (var line in lines)
+        {
+            var sku = line.SkuCode.Length > 0 ? GroupFor(line.SkuCode, "SKU编码") : null;
+            var item = line.ItemCode.Length > 0 ? GroupFor(line.ItemCode, "货品编码") : null;
+            if (sku is null && item is null)
+                continue;
+            var source = line.SkuCode.Length > 0 ? line.SkuCode : line.ItemCode;
+            var search = JoomSkuSuffix.StripCompositeTrailingSuffix(source, OccupancySuffixes);
+            _semiLines.Add(new SmtSemiLineRow(sku, item, search));
+        }
+
+        SetStatus($"正在检查半托管 {byCode.Count} 个 SKU（店铺 {shopId}，各状态合计超过 1 才算重复）…");
+        var report = await _productService.FindOccupanciesAsync(byCode.Keys.ToList(), shopId, cookieHeader, SelectedScopeKey);
+        FillDetailProbes(report);
+        foreach (var hit in report.Hits)
+        {
+            var groupHit = _semiOccupancies.FirstOrDefault(g => g.Sku.Equals(hit.Sku, StringComparison.OrdinalIgnoreCase));
+            if (groupHit is null)
+                continue;
+            var name = string.IsNullOrWhiteSpace(hit.ProductName) ? "未命名产品 " + hit.ProductId : hit.ProductName;
+            groupHit.Hits.Add(new SmtFullOccupancyHitLine
+            {
+                Summary = hit.Location + " · 「" + name + "」",
+                EditUrl = hit.EditUrl
+            });
+        }
+
+        var finished = report.CompletedLocations.Count > 0;
+        foreach (var group in _semiOccupancies)
+        {
+            group.MarkChecked(finished);
+            group.NotifyHitsChanged();
+        }
+
+        var occupied = _semiOccupancies.Where(g => g.HasHits).ToList();
+        _loadingColorOptions = true;
+        try
+        {
+            foreach (var group in occupied)
+            {
+                group.UseColorSuffix = group.ShouldAutoEnableColorSuffix || UseOccupancyColorSuffix;
+                group.LoadColorOptions(OccupancyColors);
+            }
+
+            await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.ContextIdle);
+        }
+        finally
+        {
+            _loadingColorOptions = false;
+        }
+
+        if (occupied.Count > 0)
+        {
+            try
+            {
+                await FillSuggestedSkusAsync(occupied);
+            }
+            catch (Exception ex)
+            {
+                foreach (var group in occupied)
+                {
+                    if (string.IsNullOrWhiteSpace(group.SuggestedSku))
+                        group.SuggestStatus = "查找可用后缀失败：" + ex.Message;
+                }
+
+                if (CookieErrorDetector.IsAuthFailure(ex.Message))
+                    throw;
+            }
+        }
+
+        var failed = report.FailedLocations.Count == 0
+            ? ""
+            : " 以下范围未完整核对：" + string.Join("、", report.FailedLocations) + "。";
+        var incomplete = report.IncompleteReasons.Count == 0
+            ? ""
+            : " 以下内容未完整核对：" + string.Join("、", report.IncompleteReasons.Take(5)) + "。";
+        var unfinished = report.CompletedLocations.Count == 0 && report.FailedLocations.Count > 0;
+        var claim = unfinished
+            ? "系统繁忙，查重没有完成，请稍后再试。"
+            : occupied.Count == 0
+                ? "没有发现重复。"
+                : "其中 " + occupied.Count + " 个已被占用，可在表格里选择后缀。";
+        SemiOccupancyTitle.Text = "半托管共 " + _semiOccupancies.Count + " 个 SKU，" + claim + failed + incomplete;
+        SemiOccupancyPanel.Visibility = Visibility.Visible;
+        return claim + failed + incomplete;
+    }
+
+    private async Task<string> DescribeOccupancyAsync(
+        IReadOnlyList<string> skus,
+        IReadOnlyDictionary<string, string>? columnLabels = null)
     {
         ClearOccupancy();
         var cookieHeader = GetCookieHeader();
@@ -1149,6 +1522,11 @@ public partial class SmtFullPricingView : UserControl
             {
                 var stripped = JoomSkuSuffix.StripCompositeTrailingSuffix(hit.Sku, OccupancySuffixes);
                 var group = new SmtFullOccupancyGroup(hit.Sku, stripped, JoomSkuSuffix.SplitParts(stripped));
+                if (columnLabels is not null
+                    && columnLabels.TryGetValue(hit.Sku, out var columnLabel))
+                {
+                    group.ColumnLabel = columnLabel;
+                }
                 _occupancies.Add(group);
                 if (UseOccupancyColorSuffix || group.ShouldAutoEnableColorSuffix)
                     group.UseColorSuffix = true;
@@ -1183,7 +1561,8 @@ public partial class SmtFullPricingView : UserControl
             return "已检查 " + skus.Count + " 个 SKU（" + scope + "），" + claim + failed + incomplete;
         }
 
-        OccupancyTitle.Text = _occupancies.Count + " 个 SKU 已被本店铺产品占用，直接发布可能提示重复";
+        var semiNote = columnLabels is null ? "" : "半托管 ";
+        OccupancyTitle.Text = semiNote + _occupancies.Count + " 个 SKU 已被本店铺产品占用，直接发布可能提示重复";
         OccupancyExpander.IsExpanded = true;
         OccupancyPanel.Visibility = Visibility.Visible;
         _loadingColorOptions = true;
@@ -1449,20 +1828,22 @@ public partial class SmtFullPricingView : UserControl
 
     private void RefreshSuggestedSkuColumn()
     {
-        var available = _occupancies
-            .Where(g => !string.IsNullOrWhiteSpace(g.SuggestedSku))
-            .GroupBy(g => g.Sku, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => NormalizeSku(g.First().SuggestedSku), StringComparer.OrdinalIgnoreCase);
+        var available = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in _occupancies.Concat(_semiOccupancies))
+        {
+            if (string.IsNullOrWhiteSpace(group.SuggestedSku))
+                continue;
+            available.TryAdd(group.Sku, NormalizeSku(group.SuggestedSku));
+        }
 
+        var managed = new HashSet<string>(
+            _occupancies.Concat(_semiOccupancies).Select(g => g.Sku),
+            StringComparer.OrdinalIgnoreCase);
         foreach (var row in _rows)
         {
             var original = NormalizeSku(row.PageSku);
-            if (original.Length == 0)
-            {
-                row.SuggestedSku = null;
+            if (original.Length == 0 || !managed.Contains(original))
                 continue;
-            }
-
             row.SuggestedSku = available.TryGetValue(original, out var replacement) ? replacement : null;
         }
     }
@@ -1647,6 +2028,53 @@ public partial class SmtFullPricingView : UserControl
         public string EditUrl { get; init; } = "";
     }
 
+    private sealed class SmtSemiLineRow : INotifyPropertyChanged
+    {
+        private string _searchSku;
+        private double? _price;
+
+        public SmtSemiLineRow(SmtFullOccupancyGroup? sku, SmtFullOccupancyGroup? item, string searchSku)
+        {
+            SkuSide = sku;
+            ItemSide = item;
+            _searchSku = searchSku;
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public SmtFullOccupancyGroup? SkuSide { get; }
+        public SmtFullOccupancyGroup? ItemSide { get; }
+
+        /// <summary>查商品库价格用的货号。默认从 SKU编码去掉末尾通用后缀、保留颜色。</summary>
+        public string SearchSku
+        {
+            get => _searchSku;
+            set
+            {
+                if (_searchSku == value)
+                    return;
+                _searchSku = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SearchSku)));
+            }
+        }
+
+        /// <summary>按搜索 SKU 查到的商品库参考价。</summary>
+        public double? Price
+        {
+            get => _price;
+            set
+            {
+                if (_price == value)
+                    return;
+                _price = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Price)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PriceText)));
+            }
+        }
+
+        public string PriceText => _price is null ? "" : _price.Value.ToString("0.00");
+    }
+
     private sealed class SmtFullOccupancyGroup : INotifyPropertyChanged
     {
         private bool _useColorSuffix;
@@ -1666,6 +2094,35 @@ public partial class SmtFullPricingView : UserControl
 
         public string Sku { get; }
         public string BaseSku { get; }
+        /// <summary>半托管查重时标明来自 SKU编码 还是 货品编码。普通查重为空。</summary>
+        private string _columnLabel = "";
+        public string ColumnLabel
+        {
+            get => _columnLabel;
+            set
+            {
+                if (_columnLabel == value)
+                    return;
+                _columnLabel = value;
+                OnPropertyChanged(nameof(ColumnLabel));
+            }
+        }
+        public bool HasHits => Hits.Count > 0;
+        public bool Checked { get; private set; }
+        public string OccupancyResult =>
+            !Checked ? "未核对" : Hits.Count > 0 ? "已占用" : "未占用";
+
+        public void NotifyHitsChanged()
+        {
+            OnPropertyChanged(nameof(HasHits));
+            OnPropertyChanged(nameof(OccupancyResult));
+        }
+
+        public void MarkChecked(bool finished)
+        {
+            Checked = finished;
+            OnPropertyChanged(nameof(OccupancyResult));
+        }
         public ObservableCollection<SmtFullSkuPartSlot> Parts { get; } = [];
         public ObservableCollection<string> ColorOptions { get; } = [];
         public ObservableCollection<SmtFullOccupancyHitLine> Hits { get; } = [];

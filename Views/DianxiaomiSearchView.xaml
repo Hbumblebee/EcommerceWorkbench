@@ -130,6 +130,7 @@
                             <TextBox x:Name="SearchValueBox"
                                      AcceptsReturn="True"
                                      TextWrapping="Wrap"
+                                     VerticalContentAlignment="Top"
                                      VerticalScrollBarVisibility="Auto"
                                      HorizontalScrollBarVisibility="Auto"/>
                         </DockPanel>

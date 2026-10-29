@@ -6,6 +6,7 @@
  *           合计大于 1 才视为重复；多值按对分法定位。
  * 创建日期：2026-10-22
  * 修改记录：2026-10-22 查重改为在线产品列表各状态合计，超过 1 才算重复
+ *           2026-10-24 系统繁忙时重试，失败不再抛成未处理异常
  */
 
 using System.Collections.Concurrent;
@@ -269,7 +270,7 @@ public sealed class SmtProductService
         }
 
         if (hits.Count == 0 && completed.Count == 0 && failures.Count > 0)
-            throw new InvalidOperationException("SKU 占用检查没有完成：" + string.Join("、", failures) + "。");
+            incomplete.Add("系统繁忙或接口失败，查重没有完成，请稍后重试");
 
         return new SmtSkuOccupancyReport
         {
@@ -435,6 +436,24 @@ public sealed class SmtProductService
         CancellationToken cancellationToken)
     {
         var body = BuildSearchBody(searchValue, shopId, location);
+        for (var attempt = 0; ; attempt++)
+        {
+            var result = await SearchOnceAsync(location, body, cookieHeader, cancellationToken);
+            var busy = result.Probe is not null
+                       && (result.Probe.Contains("2005", StringComparison.Ordinal)
+                           || result.Probe.Contains("系统繁忙", StringComparison.Ordinal));
+            if (!busy || attempt >= 2)
+                return result;
+            await Task.Delay(TimeSpan.FromMilliseconds(800 * (attempt + 1)), cancellationToken);
+        }
+    }
+
+    private async Task<(int Total, List<SmtSearchItem> Items, string? Probe)> SearchOnceAsync(
+        SmtListLocation location,
+        string body,
+        string cookieHeader,
+        CancellationToken cancellationToken)
+    {
         try
         {
             var (status, responseBody) = await _apiClient.SendAsync(
